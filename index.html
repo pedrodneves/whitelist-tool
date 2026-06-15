@@ -592,7 +592,7 @@
       <div class="select-wrap">
         <select id="sponsor">
           <option value="">— select —</option>
-          <option value="Global-Synchronizer-Foundation">Global Synchronizer Foundation</option>
+          <option value="Canton-Foundation">Canton Foundation</option>
           <option value="C7">C7</option>
           <option value="Cumberland">Cumberland</option>
           <option value="Digital-Asset">Digital Asset</option>
@@ -634,8 +634,8 @@
     <hr />
 
     <!-- Live command preview -->
-    <p class="preview-label">PR will be titled</p>
-    <div class="preview" id="preview">Fill in the fields above.</div>
+    <p class="preview-label">Command preview</p>
+    <div class="preview" id="preview">Fill in the fields above to see the command.</div>
 
     <!-- Submit -->
     <button class="submit-btn" id="submit-btn" onclick="handleSubmit()">
@@ -810,7 +810,9 @@
   }
 
   /**
-   * Rebuild the PR title preview whenever a field changes.
+   * Rebuild the command preview whenever a field changes.
+   * Shows the exact shell command that would have been run,
+   * colour-coded for readability.
    * Also toggles the approval "required" star for mainnet/testnet.
    */
   function updatePreview() {
@@ -820,20 +822,28 @@
     const needsApproval = v.network === "main" || v.network === "test";
     approvalReq.style.display = needsApproval ? "inline" : "none";
 
-    if (!v.network || !v.name) {
-      previewEl.innerHTML = "Fill in the fields above.";
+    if (!v.network) {
+      previewEl.innerHTML = "Fill in the fields above to see the command.";
       return;
     }
 
-    // Map the short network value to a display label
-    const netLabels = { dev: "DevNet", test: "TestNet", main: "MainNet" };
-    const netLabel  = netLabels[v.network] || v.network;
+    // Build the coloured command string
+    let html = `<span class="kw">./scripts/new-whitelist.sh</span> `;
+    html += `<span class="flg">--yes</span> `;
+    html += `<span class="val">${v.network || "…"}</span> `;
+    html += `<span class="val">${v.section || "…"}</span> `;
+    html += `<span class="val">"${v.name || "…"}"</span> `;
+    html += `<span class="val">"${v.sponsor || "…"}"</span> `;
+    html += `<span class="val">${v.ip || "…"}</span>`;
 
-    previewEl.innerHTML =
-      `<span class="kw">Whitelist</span> ` +
-      `<span class="val">${v.name || "…"}</span> ` +
-      `<span class="kw">on</span> ` +
-      `<span class="val">${netLabel}</span>`;
+    if (v.approval) {
+      html += ` <span class="val">"${v.approval}"</span>`;
+    }
+    if (v.comment) {
+      html += ` <span class="flg">--comment</span> <span class="val">"${v.comment}"</span>`;
+    }
+
+    previewEl.innerHTML = html;
   }
 
   // Attach the preview updater to every field
