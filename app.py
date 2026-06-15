@@ -80,7 +80,7 @@ GITHUB_OAUTH    = "https://github.com/login/oauth"
 
 # The scopes we ask the user to grant:
 #   repo — read and write their repos (needed to fork + push + open PR)
-OAUTH_SCOPE = "repo"
+OAUTH_SCOPE = "repo read:org"
 
 # ---------------------------------------------------------------------------
 # Small helper functions
