@@ -375,15 +375,6 @@ def api_submit():
     # ------------------------------------------------------------------
     # 3. Optional: check org membership
     # ------------------------------------------------------------------
-    if ALLOWED_ORG:
-        membership_resp = requests.get(
-            f"{GITHUB_API}/orgs/{ALLOWED_ORG}/members/{github_user}",
-            headers=github_headers(token),
-            timeout=10,
-        )
-        # 204 = is a member, 404 = is not
-        if membership_resp.status_code != 204:
-            return jsonify({"error": f"You must be a member of {ALLOWED_ORG} to submit."}), 403
 
     # ------------------------------------------------------------------
     # 4. Read the current allowed-ip-ranges.json from the target repo
