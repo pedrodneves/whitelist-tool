@@ -1,1 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Validator Whitelist — Canton Network</title>
+  <style>
+    /* -----------------------------------------------------------------------
+       Design tokens
+       All colours and sizing live here. Change a value once, it updates
+       everywhere it's used.
+    ----------------------------------------------------------------------- */
+    :root {
+      --bg:          #080c10;   /* near-black page background */
+      --surface:     #0f1318;   /* card surface */
+      --surface-2:   #161c22;   /* elevated surface (inputs, code blocks) */
+      --border:      #21282f;   /* subtle borders */
+      --border-2:    #2d363f;   /* slightly more visible borders */
+      --text:        #cdd9e5;   /* primary text */
+      --text-muted:  #636e7b;   /* labels, hints */
+      --text-dim:    #3d4852;   /* very muted, decorative */
+      --accent:      #2ea043;   /* Canton green */
+      --accent-glow: #2ea04340; /* accent at 25% opacity — used for glows */
+      --accent-dim:  #1a6329;   /* dark green for button fills */
+      --blue:        #4493f8;   /* links, info states */
+      --red:         #e5534b;   /* errors */
+      --orange:      #d08449;   /* warnings */
+      --radius:      6px;
+      --mono:        "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+      --ui:          "Inter", system-ui, -apple-system, sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--ui);
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* -----------------------------------------------------------------------
+       Topbar — always visible, shows login state
+    ----------------------------------------------------------------------- */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(8,12,16,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* The "Canton" wordmark — a subtle grid of dots as the logo mark */
+    .logo-mark {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 3px;
+    }
+
+    .logo-mark span {
+      border-radius: 1px;
+      background: var(--accent);
+      opacity: 0.7;
+    }
+
+    .logo-mark span:nth-child(2),
+    .logo-mark span:nth-child(6) { opacity: 0.3; }
+
+    .topbar-brand h1 {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: 0.02em;
+    }
+
+    .topbar-brand h1 span { color: var(--accent); }
+
+    /* User pill shown when logged in */
+    .user-pill {
+      display: none;   /* hidden until JS shows it */
+      align-items: center;
+      gap: 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: 20px;
+      padding: 4px 12px 4px 6px;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .user-pill img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1px solid var(--border-2);
+    }
+
+    .logout-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 0 0 8px;
+      margin-left: 4px;
+      border-left: 1px solid var(--border-2);
+      line-height: 1;
+      transition: color 0.15s;
+    }
+    .logout-btn:hover { color: var(--red); }
+
+    /* -----------------------------------------------------------------------
+       Page layout — two states: login wall and main form
+    ----------------------------------------------------------------------- */
+    #login-screen,
+    #app-screen {
+      display: none;
+      min-height: calc(100vh - 52px);
+    }
+
+    /* -----------------------------------------------------------------------
+       Login screen
+    ----------------------------------------------------------------------- */
+    #login-screen {
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 16px;
+      text-align: center;
+    }
+
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 40px 36px;
+      max-width: 400px;
+      width: 100%;
+    }
+
+    /* Decorative node graph — the signature element of this design.
+       Represents the network topology Canton is about. */
+    .node-graph {
+      position: relative;
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 28px;
+    }
+
+    .node-graph svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .login-card h2 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .login-card p {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-bottom: 28px;
+      line-height: 1.5;
+    }
+
+    .github-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--ui);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 10px 16px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .github-btn:hover {
+      background: #30363d;
+      border-color: #8b949e;
+    }
+
+    .github-btn svg {
+      flex-shrink: 0;
+    }
+
+    /* -----------------------------------------------------------------------
+       App screen (shown after login)
+    ----------------------------------------------------------------------- */
+    #app-screen {
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px 80px;
+    }
+
+    .page-header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .page-header .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+
+    .page-header h2 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.025em;
+      margin-bottom: 6px;
+    }
+
+    .page-header p {
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    /* -----------------------------------------------------------------------
+       Form card
+    ----------------------------------------------------------------------- */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px;
+      width: 100%;
+      max-width: 560px;
+    }
+
+    /* Two-column grid for network + section */
+    .row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    /* -----------------------------------------------------------------------
+       Form fields
+    ----------------------------------------------------------------------- */
+    .field { margin-bottom: 18px; }
+
+    .field label {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+    }
+
+    .field label .req   { color: var(--red); }
+    .field label .hint  {
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    input[type="text"],
+    select {
+      width: 100%;
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--ui);
+      font-size: 14px;
+      padding: 7px 10px;
+      outline: none;
+      appearance: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    input[type="text"]:focus,
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    #ip {
+      font-family: var(--mono);
+      font-size: 13px;
+      letter-spacing: 0.05em;
+    }
+
+    /* Custom select arrow */
+    .select-wrap {
+      position: relative;
+    }
+
+    .select-wrap::after {
+      content: "▾";
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+      font-size: 12px;
+    }
+
+    /* -----------------------------------------------------------------------
+       Command preview
+    ----------------------------------------------------------------------- */
+    .preview-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-dim);
+      margin-bottom: 5px;
+    }
+
+    .preview {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      line-height: 1.8;
+      color: var(--text-muted);
+      word-break: break-all;
+      min-height: 42px;
+      margin-bottom: 20px;
+    }
+
+    .preview .kw  { color: #4493f8; }
+    .preview .val { color: var(--accent); }
+    .preview .flg { color: #c9a1ff; }
+
+    /* -----------------------------------------------------------------------
+       Divider
+    ----------------------------------------------------------------------- */
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 22px 0;
+    }
+
+    /* -----------------------------------------------------------------------
+       Submit button
+    ----------------------------------------------------------------------- */
+    .submit-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--accent-dim);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      color: #fff;
+      font-family: var(--ui);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 9px 16px;
+      cursor: pointer;
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+
+    .submit-btn:hover:not(:disabled) {
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    .submit-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    /* -----------------------------------------------------------------------
+       Result output
+    ----------------------------------------------------------------------- */
+    .result {
+      margin-top: 16px;
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      font-size: 13px;
+      display: none;
+    }
+
+    .result.success {
+      background: #0d2116;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+    }
+
+    .result.error {
+      background: #200d0c;
+      border: 1px solid var(--red);
+      color: var(--red);
+    }
+
+    .result a {
+      color: inherit;
+      font-weight: 600;
+    }
+
+    /* -----------------------------------------------------------------------
+       Spinner
+    ----------------------------------------------------------------------- */
+    .spinner {
+      display: inline-block;
+      width: 13px;
+      height: 13px;
+      border: 2px solid rgba(255,255,255,0.25);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.65s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* -----------------------------------------------------------------------
+       Responsive
+    ----------------------------------------------------------------------- */
+    @media (max-width: 480px) {
+      .row-2 { grid-template-columns: 1fr; }
+      .card   { padding: 20px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ======================================================================
+     Topbar
+====================================================================== -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <!-- Dot-grid logo mark representing a distributed network -->
+    <div class="logo-mark" aria-hidden="true">
+      <span></span><span></span><span></span>
+      <span></span><span></span><span></span>
+      <span></span><span></span><span></span>
+    </div>
+    <h1>canton<span>/</span>whitelist</h1>
+  </div>
+
+  <!-- Shown only when logged in -->
+  <div class="user-pill" id="user-pill">
+    <img id="user-avatar" src="" alt="avatar" />
+    <span id="user-name"></span>
+    <button class="logout-btn" onclick="logout()">sign out</button>
+  </div>
+</header>
+
+
+<!-- ======================================================================
+     Login screen — shown before authentication
+====================================================================== -->
+<main id="login-screen">
+  <div class="login-card">
+
+    <!-- Node graph: three circles connected by lines — the signature element -->
+    <div class="node-graph" aria-hidden="true">
+      <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Connection lines -->
+        <line x1="40" y1="12" x2="12" y2="60" stroke="#2ea04340" stroke-width="1.5"/>
+        <line x1="40" y1="12" x2="68" y2="60" stroke="#2ea04340" stroke-width="1.5"/>
+        <line x1="12"  y1="60" x2="68" y2="60" stroke="#2ea04340" stroke-width="1.5"/>
+        <line x1="40" y1="12" x2="40" y2="60" stroke="#2ea04330" stroke-width="1"/>
+        <!-- Nodes -->
+        <circle cx="40" cy="12" r="5"  fill="#2ea043"/>
+        <circle cx="12" cy="60" r="5"  fill="#2ea04380"/>
+        <circle cx="68" cy="60" r="5"  fill="#2ea04380"/>
+        <circle cx="40" cy="60" r="3"  fill="#2ea04350"/>
+        <!-- Pulse ring on top node -->
+        <circle cx="40" cy="12" r="9"  stroke="#2ea04330" stroke-width="1.5" fill="none">
+          <animate attributeName="r" from="6" to="14" dur="2s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite"/>
+        </circle>
+      </svg>
+    </div>
+
+    <h2>Validator Whitelist Tool</h2>
+    <p>
+      Sign in with your GitHub account to submit a PR to
+      <code style="font-family:monospace; font-size:12px; color:var(--accent)">canton-foundation/configs-private</code>.
+    </p>
+
+    <!-- This href is set by JavaScript once it knows the backend URL -->
+    <a class="github-btn" id="login-btn" href="#">
+      <!-- GitHub Invertocat icon -->
+      <svg width="18" height="18" viewBox="0 0 98 96" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+        <path fill-rule="evenodd" clip-rule="evenodd" d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"/>
+      </svg>
+      Sign in with GitHub
+    </a>
+
+    <!-- Error message shown if OAuth fails -->
+    <p id="login-error" style="display:none; margin-top:16px; font-size:12px; color:var(--red);"></p>
+
+  </div>
+</main>
+
+
+<!-- ======================================================================
+     App screen — shown after login
+====================================================================== -->
+<main id="app-screen">
+
+  <div class="page-header">
+    <div class="eyebrow">Canton Network</div>
+    <h2>Add validator to whitelist</h2>
+    <p>Creates a PR against <code style="font-family:monospace; font-size:12px">canton-foundation/configs-private</code></p>
+  </div>
+
+  <div class="card">
+
+    <!-- Network + Section -->
+    <div class="row-2">
+      <div class="field">
+        <label for="network">Network <span class="req">*</span></label>
+        <div class="select-wrap">
+          <select id="network">
+            <option value="">— select —</option>
+            <option value="dev">DevNet</option>
+            <option value="test">TestNet</option>
+            <option value="main">MainNet</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="section">Section <span class="req">*</span></label>
+        <div class="select-wrap">
+          <select id="section">
+            <option value="">— select —</option>
+            <option value="validators">validators</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Organisation name -->
+    <div class="field">
+      <label for="name">Organisation <span class="req">*</span></label>
+      <input type="text" id="name" placeholder="e.g. Fiews" autocomplete="off" />
+    </div>
+
+    <!-- Sponsor -->
+    <div class="field" id="sponsor-field">
+      <label for="sponsor">
+        Sponsor
+        <span class="hint">— not required for svs / vpns</span>
+      </label>
+      <input type="text" id="sponsor" placeholder="e.g. Global-Synchronizer-Foundation" autocomplete="off" />
+    </div>
+
+    <!-- IP address -->
+    <div class="field">
+      <label for="ip">IP address <span class="req">*</span></label>
+      <input type="text" id="ip" placeholder="66.18.13.153" autocomplete="off" maxlength="15" />
+    </div>
+
+    <!-- Approval link -->
+    <div class="field">
+      <label for="approval">
+        Approval link
+        <span class="req" id="approval-req" style="display:none">*</span>
+        <span class="hint" id="approval-hint">— required for mainnet / testnet</span>
+      </label>
+      <input type="text" id="approval" placeholder="https://lists.sync.global/g/…" autocomplete="off" />
+    </div>
+
+    <!-- Optional comment -->
+    <div class="field">
+      <label for="comment">
+        Comment
+        <span class="hint">— optional, added to PR body</span>
+      </label>
+      <input type="text" id="comment" placeholder="Any context for reviewers…" autocomplete="off" />
+    </div>
+
+    <hr />
+
+    <!-- Live command preview -->
+    <p class="preview-label">PR will be titled</p>
+    <div class="preview" id="preview">Fill in the fields above.</div>
+
+    <!-- Submit -->
+    <button class="submit-btn" id="submit-btn" onclick="handleSubmit()">
+      Create PR
+    </button>
+
+    <!-- Result -->
+    <div class="result" id="result"></div>
+
+  </div>
+</main>
+
+
+<script>
+  /**
+   * =========================================================================
+   * Configuration
+   * =========================================================================
+   * Change BACKEND_URL to wherever you deploy the Flask server.
+   * During local development this points to localhost.
+   */
+  const BACKEND_URL = "https://whitelist-tool.onrender.com";
+
+  // =========================================================================
+  // DOM references — grab elements once, reuse everywhere
+  // =========================================================================
+  const loginScreen  = document.getElementById("login-screen");
+  const appScreen    = document.getElementById("app-screen");
+  const userPill     = document.getElementById("user-pill");
+  const userAvatar   = document.getElementById("user-avatar");
+  const userName     = document.getElementById("user-name");
+  const loginBtn     = document.getElementById("login-btn");
+  const loginError   = document.getElementById("login-error");
+  const submitBtn    = document.getElementById("submit-btn");
+  const resultEl     = document.getElementById("result");
+  const previewEl    = document.getElementById("preview");
+  const approvalReq  = document.getElementById("approval-req");
+
+  // Form fields
+  const fields = {
+    network:  document.getElementById("network"),
+    section:  document.getElementById("section"),
+    name:     document.getElementById("name"),
+    sponsor:  document.getElementById("sponsor"),
+    ip:       document.getElementById("ip"),
+    approval: document.getElementById("approval"),
+    comment:  document.getElementById("comment"),
+  };
+
+  // =========================================================================
+  // State — the access token lives in memory only (not localStorage)
+  // Keeping it in memory means it's never written to disk and is cleared
+  // automatically when the tab is closed.
+  // =========================================================================
+  let accessToken = null;   // GitHub OAuth access token
+
+  // =========================================================================
+  // Initialisation — runs as soon as the page loads
+  // =========================================================================
+
+  /**
+   * Entry point. Checks two things:
+   *   1. Did GitHub just redirect back with a token in the URL fragment?
+   *   2. Is there an error param in the query string?
+   * Then shows the right screen.
+   */
+  async function init() {
+    // Set the login button's href to the backend OAuth start URL
+    loginBtn.href = `${BACKEND_URL}/auth/login`;
+
+    // Check for an OAuth error in the query string
+    // e.g. ?error=state_mismatch
+    const urlParams = new URLSearchParams(window.location.search);
+    const error = urlParams.get("error");
+    if (error) {
+      showLoginError(`Authentication failed: ${error.replace(/_/g, " ")}`);
+    }
+
+    // Check for a token in the URL fragment
+    // e.g. #token=gho_xxxxxxxxxxxx
+    // The fragment is the part after # — never sent to servers
+    const hash = window.location.hash;
+    if (hash.startsWith("#token=")) {
+      // Extract the token from the fragment
+      accessToken = hash.slice("#token=".length);
+
+      // Clean the token from the URL so it doesn't stay visible in the address bar
+      // replaceState() updates the URL without adding a browser history entry
+      window.history.replaceState(null, "", window.location.pathname);
+
+      // Verify the token works and fetch the user's profile
+      await loadUser();
+      return;
+    }
+
+    // No token found — show the login screen
+    showLoginScreen();
+  }
+
+  /**
+   * Fetch the user's GitHub profile from our backend.
+   * If it works, show the app. If not, show the login screen.
+   */
+  async function loadUser() {
+    try {
+      const resp = await fetch(`${BACKEND_URL}/auth/user`, {
+        headers: { "Authorization": `Bearer ${accessToken}` },
+      });
+
+      if (!resp.ok) throw new Error("Auth check failed");
+
+      const user = await resp.json();
+
+      // Populate the user pill in the topbar
+      userAvatar.src = user.avatar_url;
+      userName.textContent = `@${user.login}`;
+      userPill.style.display = "flex";
+
+      showAppScreen();
+
+    } catch {
+      // Token didn't work — back to login
+      accessToken = null;
+      showLoginScreen();
+    }
+  }
+
+  // =========================================================================
+  // Screen switching helpers
+  // =========================================================================
+
+  function showLoginScreen() {
+    loginScreen.style.display = "flex";
+    appScreen.style.display   = "none";
+    userPill.style.display    = "none";
+  }
+
+  function showAppScreen() {
+    loginScreen.style.display = "none";
+    appScreen.style.display   = "flex";
+  }
+
+  function showLoginError(msg) {
+    loginError.textContent    = msg;
+    loginError.style.display  = "block";
+    loginScreen.style.display = "flex";
+    appScreen.style.display   = "none";
+  }
+
+  /** Sign out — clear the token and go back to the login screen. */
+  function logout() {
+    accessToken = null;
+    userPill.style.display = "none";
+    showLoginScreen();
+  }
+
+  // =========================================================================
+  // Live preview
+  // =========================================================================
+
+  /** Collect all field values into a plain object. */
+  function getValues() {
+    return {
+      network:  fields.network.value.trim(),
+      section:  fields.section.value.trim(),
+      name:     fields.name.value.trim(),
+      sponsor:  fields.sponsor.value.trim(),
+      ip:       fields.ip.value.trim(),
+      approval: fields.approval.value.trim(),
+      comment:  fields.comment.value.trim(),
+    };
+  }
+
+  /**
+   * Rebuild the PR title preview whenever a field changes.
+   * Also toggles the approval "required" star for mainnet/testnet.
+   */
+  function updatePreview() {
+    const v = getValues();
+
+    // Toggle approval required marker
+    const needsApproval = v.network === "main" || v.network === "test";
+    approvalReq.style.display = needsApproval ? "inline" : "none";
+
+    if (!v.network || !v.name) {
+      previewEl.innerHTML = "Fill in the fields above.";
+      return;
+    }
+
+    // Map the short network value to a display label
+    const netLabels = { dev: "DevNet", test: "TestNet", main: "MainNet" };
+    const netLabel  = netLabels[v.network] || v.network;
+
+    previewEl.innerHTML =
+      `<span class="kw">Whitelist</span> ` +
+      `<span class="val">${v.name || "…"}</span> ` +
+      `<span class="kw">on</span> ` +
+      `<span class="val">${netLabel}</span>`;
+  }
+
+  // Attach the preview updater to every field
+  Object.values(fields).forEach(el => {
+    el.addEventListener("input",  updatePreview);
+    el.addEventListener("change", updatePreview);
+  });
+
+  // =========================================================================
+  // Form submission
+  // =========================================================================
+
+  /**
+   * Send the form to the backend and handle the response.
+   *
+   * Uses async/await — "async" means the function is non-blocking.
+   * "await" pauses here until the fetch() resolves without freezing the browser.
+   */
+  async function handleSubmit() {
+    const v = getValues();
+
+    // Quick client-side check before hitting the network
+    if (!v.network || !v.section || !v.name || !v.ip) {
+      showResult("Please fill in all required fields.", false);
+      return;
+    }
+
+    setLoading(true);
+    hideResult();
+
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/submit`, {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${accessToken}`,  // our GitHub token
+        },
+        body: JSON.stringify(v),   // convert JS object → JSON string
+      });
+
+      const data = await resp.json();
+
+      if (resp.ok && data.success) {
+        // Show a success message with a clickable link to the PR
+        showResult(
+          `✓ PR created: <a href="${data.pr_url}" target="_blank" rel="noopener">${data.pr_url}</a>`,
+          true
+        );
+      } else {
+        showResult(data.error || "Something went wrong.", false);
+      }
+
+    } catch (err) {
+      showResult(`Could not reach the server.\n${err.message}`, false);
+    } finally {
+      // Always re-enable the button, success or failure
+      setLoading(false);
+    }
+  }
+
+  // =========================================================================
+  // UI state helpers
+  // =========================================================================
+
+  /** Toggle the loading state on the submit button. */
+  function setLoading(isLoading) {
+    submitBtn.disabled = isLoading;
+    submitBtn.innerHTML = isLoading
+      ? `<span class="spinner"></span> Creating PR…`
+      : `Create PR`;
+  }
+
+  /** Show the result box with a success or error style. */
+  function showResult(html, success) {
+    resultEl.innerHTML   = html;
+    resultEl.className   = `result ${success ? "success" : "error"}`;
+    resultEl.style.display = "block";
+  }
+
+  /** Hide the result box. */
+  function hideResult() {
+    resultEl.style.display = "none";
+  }
+
+  // =========================================================================
+  // Boot
+  // =========================================================================
+  init();   // kick everything off when the page loads
+</script>
+
+</body>
+</html>
 
