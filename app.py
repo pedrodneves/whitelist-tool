@@ -418,7 +418,22 @@ def api_submit():
     # 6. Commit the updated file to the fork branch
     # ------------------------------------------------------------------
 
-    # current_sha already holds the fork's file SHA (read after sync above)
+    # Read the file SHA specifically from the new branch.
+    # We cannot reuse the SHA from main — after branch creation the file
+    # SHA on the new branch must be confirmed fresh, otherwise GitHub
+    # returns a 409 conflict when we try to commit.
+    branch_file_resp = requests.get(
+        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/contents/{config_path}",
+        headers=pat_headers(),
+        params={"ref": branch_name},
+        timeout=10,
+    )
+    if branch_file_resp.status_code != 200:
+        return jsonify({"error": f"Could not read file from branch. Status: {branch_file_resp.status_code}"}), 500
+
+    # This is the SHA GitHub expects when we PUT the updated file
+    branch_file_sha = branch_file_resp.json()["sha"]
+
     updated_b64 = base64.b64encode(updated_json_str.encode("utf-8")).decode("utf-8")
 
     commit_resp = requests.put(
@@ -427,7 +442,7 @@ def api_submit():
         json={
             "message": f"Add {name} to {canonical_section} on {canonical_network}",
             "content": updated_b64,
-            "sha":     current_sha,
+            "sha":     branch_file_sha,
             "branch":  branch_name,
         },
         timeout=10,
