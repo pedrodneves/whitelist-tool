@@ -11,20 +11,21 @@
        everywhere it's used.
     ----------------------------------------------------------------------- */
     :root {
-      --bg:          #080c10;   /* near-black page background */
-      --surface:     #0f1318;   /* card surface */
-      --surface-2:   #161c22;   /* elevated surface (inputs, code blocks) */
-      --border:      #21282f;   /* subtle borders */
-      --border-2:    #2d363f;   /* slightly more visible borders */
-      --text:        #cdd9e5;   /* primary text */
-      --text-muted:  #636e7b;   /* labels, hints */
-      --text-dim:    #3d4852;   /* very muted, decorative */
-      --accent:      #2ea043;   /* Canton green */
-      --accent-glow: #2ea04340; /* accent at 25% opacity — used for glows */
-      --accent-dim:  #1a6329;   /* dark green for button fills */
-      --blue:        #4493f8;   /* links, info states */
-      --red:         #e5534b;   /* errors */
-      --orange:      #d08449;   /* warnings */
+      /* Canton Foundation exact palette */
+      --bg:          #0a0612;   /* near-black purple base */
+      --surface:     #110e1f;   /* card surface */
+      --surface-2:   #19162c;   /* inputs, elevated elements */
+      --border:      #26204a;   /* subtle borders */
+      --border-2:    #332b5e;   /* visible borders */
+      --text:        #ffffff;   /* pure white */
+      --text-muted:  #8880aa;   /* secondary text */
+      --text-dim:    #3a3460;   /* very muted */
+      --accent:      #f3ff97;   /* Canton yellow-green — exact value */
+      --accent-glow: #f3ff9720; /* yellow-green glow */
+      --accent-dim:  #8fa800;   /* darker fill for buttons */
+      --blue:        #9b8fe8;   /* purple highlight */
+      --red:         #ff5c5c;   /* errors */
+      --orange:      #e09050;   /* warnings */
       --radius:      6px;
       --mono:        "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
       --ui:          "Inter", system-ui, -apple-system, sans-serif;
@@ -36,6 +37,8 @@
 
     body {
       background: var(--bg);
+      background-image: radial-gradient(ellipse at 40% 0%, #2d1060 0%, transparent 60%),
+                        radial-gradient(ellipse at 80% 20%, #3d1040 0%, transparent 50%);
       color: var(--text);
       font-family: var(--ui);
       font-size: 14px;
@@ -50,7 +53,7 @@
       position: sticky;
       top: 0;
       z-index: 100;
-      background: rgba(8,12,16,0.85);
+      background: rgba(10,6,18,0.95);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
@@ -362,8 +365,8 @@
       margin-bottom: 20px;
     }
 
-    .preview .kw  { color: #4493f8; }
-    .preview .val { color: var(--accent); }
+    .preview .kw  { color: #9b8fe8; }
+    .preview .val { color: #f3ff97; }
     .preview .flg { color: #c9a1ff; }
 
     /* -----------------------------------------------------------------------
@@ -387,7 +390,7 @@
       background: var(--accent-dim);
       border: 1px solid var(--accent);
       border-radius: var(--radius);
-      color: #fff;
+      color: #0a0612;
       font-family: var(--ui);
       font-size: 14px;
       font-weight: 600;
@@ -418,7 +421,7 @@
     }
 
     .result.success {
-      background: #0d2116;
+      background: #1a1d00;
       border: 1px solid var(--accent);
       color: var(--accent);
     }
@@ -497,17 +500,17 @@
     <div class="node-graph" aria-hidden="true">
       <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
         <!-- Connection lines -->
-        <line x1="40" y1="12" x2="12" y2="60" stroke="#2ea04340" stroke-width="1.5"/>
-        <line x1="40" y1="12" x2="68" y2="60" stroke="#2ea04340" stroke-width="1.5"/>
-        <line x1="12"  y1="60" x2="68" y2="60" stroke="#2ea04340" stroke-width="1.5"/>
-        <line x1="40" y1="12" x2="40" y2="60" stroke="#2ea04330" stroke-width="1"/>
+        <line x1="40" y1="12" x2="12" y2="60" stroke="#f3ff9730" stroke-width="1.5"/>
+        <line x1="40" y1="12" x2="68" y2="60" stroke="#f3ff9730" stroke-width="1.5"/>
+        <line x1="12"  y1="60" x2="68" y2="60" stroke="#f3ff9730" stroke-width="1.5"/>
+        <line x1="40" y1="12" x2="40" y2="60" stroke="#9b8fe828" stroke-width="1"/>
         <!-- Nodes -->
-        <circle cx="40" cy="12" r="5"  fill="#2ea043"/>
-        <circle cx="12" cy="60" r="5"  fill="#2ea04380"/>
-        <circle cx="68" cy="60" r="5"  fill="#2ea04380"/>
-        <circle cx="40" cy="60" r="3"  fill="#2ea04350"/>
+        <circle cx="40" cy="12" r="5"  fill="#f3ff97"/>
+        <circle cx="12" cy="60" r="5"  fill="#9b8fe880"/>
+        <circle cx="68" cy="60" r="5"  fill="#9b8fe880"/>
+        <circle cx="40" cy="60" r="3"  fill="#f3ff9750"/>
         <!-- Pulse ring on top node -->
-        <circle cx="40" cy="12" r="9"  stroke="#2ea04330" stroke-width="1.5" fill="none">
+        <circle cx="40" cy="12" r="9"  stroke="#9b8fe828" stroke-width="1.5" fill="none">
           <animate attributeName="r" from="6" to="14" dur="2s" repeatCount="indefinite"/>
           <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite"/>
         </circle>
@@ -909,4 +912,3 @@
 
 </body>
 </html>
-
