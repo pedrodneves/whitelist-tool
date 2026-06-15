@@ -381,9 +381,13 @@ def api_submit():
     # ------------------------------------------------------------------
     config_path = f"configs/{canonical_network}/allowed-ip-ranges.json"
 
+    # GITHUB_PAT is set as an environment variable on Render
+    pat = os.environ.get("GITHUB_PAT", "")
+    read_headers = github_headers(pat) if pat else github_headers(token)
+
     file_resp = requests.get(
         f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/contents/{config_path}",
-        headers=github_headers(token),
+        headers=read_headers,
         timeout=10,
     )
 
