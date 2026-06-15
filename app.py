@@ -390,8 +390,12 @@ def api_submit():
     # ------------------------------------------------------------------
     # 5. Get main SHA and create a new branch on the FORK
     # ------------------------------------------------------------------
-    safe_name   = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    branch_name = f"whitelist-{canonical_network.lower()}-{canonical_section.replace(' ', '-')}-{safe_name}"
+    safe_name     = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    # Random 6-char suffix ensures every submission creates a fresh branch.
+    # Without this, resubmitting the same org reuses an old branch with
+    # stale commits, producing a dirty diff in the PR.
+    random_suffix = secrets.token_hex(3)
+    branch_name   = f"whitelist-{canonical_network.lower()}-{canonical_section.replace(' ', '-')}-{safe_name}-{random_suffix}"
 
     # Read the fork's main HEAD SHA
     main_ref_resp = requests.get(
