@@ -11,16 +11,25 @@ A Flask server with two responsibilities:
                           to the frontend
 
   2. PR creation
-     - /api/submit      → receives form data, uses a PAT to read the private
-                          repo and open a PR against canton-foundation/configs-private
+     - /api/submit      → reads the config from the upstream repo,
+                          writes the updated file to pedrodneves/configs-private (the fork),
+                          then opens a PR from the fork → canton-foundation/configs-private
+
+Why a fork?
+  pedrodneves doesn't have write access to canton-foundation/configs-private.
+  The fork (pedrodneves/configs-private) is owned by pedrodneves, so the PAT
+  generated from that account has full write access to it.
+  GitHub allows PRs from forks to the upstream repo — this is the standard
+  open source contribution model.
 
 Environment variables (set on Render):
     GITHUB_CLIENT_ID      — from your GitHub OAuth App
     GITHUB_CLIENT_SECRET  — from your GitHub OAuth App
-    GITHUB_PAT            — Personal Access Token with repo scope (reads configs-private)
+    GITHUB_PAT            — Personal Access Token from pedrodneves with repo scope
     FRONTEND_URL          — https://pedrodneves.github.io/whitelist-tool
-    TARGET_REPO_OWNER     — canton-foundation
+    TARGET_REPO_OWNER     — canton-foundation  (where the PR lands)
     TARGET_REPO_NAME      — configs-private
+    FORK_OWNER            — pedrodneves        (where we push the branch)
     FLASK_SECRET_KEY      — long random string for signing sessions
 """
 
@@ -43,7 +52,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Secret key for signing session cookies — must be stable across restarts in prod
+# Secret key for signing session cookies
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 
 # Allow all origins — security comes from the GitHub token, not the origin
@@ -56,20 +65,22 @@ CORS(app, origins="*", supports_credentials=False)
 GITHUB_CLIENT_ID     = os.environ["GITHUB_CLIENT_ID"]
 GITHUB_CLIENT_SECRET = os.environ["GITHUB_CLIENT_SECRET"]
 FRONTEND_URL         = os.environ.get("FRONTEND_URL", "http://localhost:8080")
-TARGET_OWNER         = os.environ.get("TARGET_REPO_OWNER", "canton-foundation")
-TARGET_REPO          = os.environ.get("TARGET_REPO_NAME", "configs-private")
 
-# PAT = Personal Access Token stored on Render.
-# Used for all GitHub API calls against the private configs repo.
-# This token needs repo scope on canton-foundation/configs-private.
-GITHUB_PAT           = os.environ.get("GITHUB_PAT", "")
+# The upstream repo — where the PR is opened against
+TARGET_OWNER = os.environ.get("TARGET_REPO_OWNER", "canton-foundation")
+TARGET_REPO  = os.environ.get("TARGET_REPO_NAME",  "configs-private")
+
+# The fork — where we push the branch (pedrodneves owns this so the PAT works)
+FORK_OWNER   = os.environ.get("FORK_OWNER", "pedrodneves")
+
+# PAT from pedrodneves account — has write access to the fork
+GITHUB_PAT   = os.environ.get("GITHUB_PAT", "")
 
 GITHUB_API   = "https://api.github.com"
 GITHUB_OAUTH = "https://github.com/login/oauth"
 
-# Scopes requested from the user during OAuth login.
-# We only need to identify the user — all repo work is done via the PAT.
-OAUTH_SCOPE = "read:user"
+# Only need to identify the user — all repo work is done via the PAT
+OAUTH_SCOPE  = "read:user"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -77,8 +88,8 @@ OAUTH_SCOPE = "read:user"
 
 def pat_headers() -> dict:
     """
-    Build GitHub API headers using the server-side PAT.
-    Used for all calls to configs-private (read file, create branch, commit, open PR).
+    GitHub API headers using the server-side PAT.
+    Used for all calls to the fork (read, branch, commit, PR).
     The PAT is stored securely on Render — never exposed to the browser.
     """
     return {
@@ -90,8 +101,8 @@ def pat_headers() -> dict:
 
 def user_headers(token: str) -> dict:
     """
-    Build GitHub API headers using the user's OAuth token.
-    Only used to identify who is logged in (/auth/user route).
+    GitHub API headers using the user's OAuth token.
+    Only used to identify who is logged in.
     """
     return {
         "Authorization": f"Bearer {token}",
@@ -102,9 +113,8 @@ def user_headers(token: str) -> dict:
 
 def is_valid_ip(ip: str) -> bool:
     """
-    Check that a string is a valid IPv4 address.
-    Pattern matches four groups of 1-3 digits separated by dots.
-    Then checks each octet is 0-255.
+    Validate a string is a proper IPv4 address.
+    Checks format with regex then verifies each octet is 0-255.
     """
     pattern = r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"
     if not re.match(pattern, ip):
@@ -113,10 +123,7 @@ def is_valid_ip(ip: str) -> bool:
 
 
 def sanitize(text: str) -> str:
-    """
-    Strip whitespace and remove characters that could cause issues
-    in JSON values or branch names.
-    """
+    """Strip whitespace and remove characters that could cause issues."""
     dangerous = ['"', "'", "`", ";", "&", "|", "$", "(", ")", "<", ">", "\n", "\r"]
     cleaned = text.strip()
     for char in dangerous:
@@ -125,10 +132,7 @@ def sanitize(text: str) -> str:
 
 
 def _extract_token() -> str | None:
-    """
-    Read the OAuth token from the Authorization: Bearer <token> header.
-    Returns None if the header is missing or malformed.
-    """
+    """Read the OAuth token from the Authorization: Bearer <token> header."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return None
@@ -143,8 +147,7 @@ def _extract_token() -> str | None:
 def auth_login():
     """
     Step 1 of OAuth — redirect the user to GitHub's authorization page.
-    We generate a random 'state' token to prevent CSRF attacks and store
-    it in the session cookie to verify when GitHub redirects back.
+    Generates a random state token to prevent CSRF attacks.
     """
     state = secrets.token_urlsafe(16)
     session["oauth_state"] = state
@@ -163,14 +166,13 @@ def auth_login():
 def auth_callback():
     """
     Step 2 of OAuth — GitHub redirects here with ?code=...&state=...
-    We verify the state (CSRF check), exchange the code for an access token,
-    then redirect to the frontend with the token in the URL fragment (#token=...).
-    The fragment is never sent to servers — it stays in the browser only.
+    Verifies state, exchanges code for access token, redirects to frontend
+    with token in URL fragment (#token=...) which never hits a server.
     """
     code  = request.args.get("code")
     state = request.args.get("state")
 
-    # CSRF check
+    # CSRF check — state must match what we stored in the session
     if not state or state != session.pop("oauth_state", None):
         return redirect(f"{FRONTEND_URL}/?error=state_mismatch")
 
@@ -196,7 +198,7 @@ def auth_callback():
         error = token_data.get("error_description", "token_exchange_failed")
         return redirect(f"{FRONTEND_URL}/?error={error}")
 
-    # Pass the token to the frontend via URL fragment (never hits a server)
+    # Pass token to frontend via URL fragment — never hits a server
     return redirect(f"{FRONTEND_URL}/#token={access_token}")
 
 
@@ -204,8 +206,7 @@ def auth_callback():
 def auth_user():
     """
     Returns the logged-in user's GitHub profile (login + avatar).
-    Used by the frontend to show "Signed in as @username" in the topbar.
-    Uses the user's own OAuth token — not the PAT.
+    Used by the frontend to show "Signed in as @username".
     """
     token = _extract_token()
     if not token:
@@ -221,8 +222,6 @@ def auth_user():
         return jsonify({"error": "GitHub API error"}), response.status_code
 
     user = response.json()
-
-    # Only return what the frontend needs
     return jsonify({
         "login":      user["login"],
         "avatar_url": user["avatar_url"],
@@ -237,17 +236,20 @@ def auth_user():
 @app.route("/api/submit", methods=["POST"])
 def api_submit():
     """
-    Main action: read the config, update it, create a branch, commit, open PR.
+    Main action — the full flow:
 
-    All GitHub API calls use the server-side PAT (not the user's token).
-    This means the tool works for any logged-in user regardless of their
-    personal repo permissions — the PAT is what has write access to configs-private.
+      1. Validate all form fields
+      2. Read allowed-ip-ranges.json from the UPSTREAM repo (canton-foundation)
+      3. Update the JSON in memory (add the new IP)
+      4. Sync the fork's main branch with upstream main
+      5. Create a new branch on the FORK (pedrodneves/configs-private)
+      6. Commit the updated file to that branch
+      7. Open a PR from fork:branch → upstream:main
 
-    The user's identity is still verified via OAuth — we just use it to show
-    their name, not to make API calls.
+    All GitHub API calls use the server-side PAT — the user's OAuth token
+    is only used to show their name in the PR body.
     """
 
-    # Must be logged in to submit
     token = _extract_token()
     if not token:
         return jsonify({"error": "Not authenticated"}), 401
@@ -256,7 +258,7 @@ def api_submit():
         return jsonify({"error": "Server is missing GITHUB_PAT environment variable."}), 500
 
     # ------------------------------------------------------------------
-    # 1. Parse and validate inputs
+    # 1. Validate inputs
     # ------------------------------------------------------------------
     data = request.get_json()
     if not data:
@@ -272,7 +274,7 @@ def api_submit():
 
     errors = []
 
-    # Map input network names to canonical folder names used in the repo
+    # Map input → canonical folder names used in the repo
     network_map = {
         "dev":     "DevNet",
         "devnet":  "DevNet",
@@ -285,7 +287,7 @@ def api_submit():
     if not canonical_network:
         errors.append(f"Invalid network '{network}'. Use dev, test, or main.")
 
-    # Map input section names to canonical JSON keys
+    # Map input → canonical JSON section keys
     section_map = {
         "validators":        "validators",
         "v":                 "validators",
@@ -321,49 +323,44 @@ def api_submit():
     # ------------------------------------------------------------------
     # 2. Get the submitting user's GitHub login (for the PR body)
     # ------------------------------------------------------------------
-    user_resp = requests.get(
-        f"{GITHUB_API}/user",
-        headers=user_headers(token),
-        timeout=10,
-    )
+    user_resp   = requests.get(f"{GITHUB_API}/user", headers=user_headers(token), timeout=10)
     github_user = user_resp.json().get("login", "unknown") if user_resp.status_code == 200 else "unknown"
 
     # ------------------------------------------------------------------
-    # 3. Read the current allowed-ip-ranges.json using the PAT
+    # 3. Read the current config from the UPSTREAM repo
+    #    We read from upstream (canton-foundation) to always get the
+    #    latest version, even if the fork is behind.
     # ------------------------------------------------------------------
     config_path = f"configs/{canonical_network}/allowed-ip-ranges.json"
 
     file_resp = requests.get(
         f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/contents/{config_path}",
-        headers=pat_headers(),   # PAT has access to the private repo
+        headers=pat_headers(),
         timeout=10,
     )
 
     if file_resp.status_code != 200:
-        return jsonify({"error": f"Could not read {config_path} from {TARGET_OWNER}/{TARGET_REPO}. Status: {file_resp.status_code}"}), 500
+        return jsonify({"error": f"Could not read {config_path} from upstream. Status: {file_resp.status_code}"}), 500
 
-    file_data       = file_resp.json()
-    current_sha     = file_data["sha"]   # needed when committing the update
-    current_json    = json.loads(base64.b64decode(file_data["content"]).decode("utf-8"))
+    file_data    = file_resp.json()
+    current_sha  = file_data["sha"]
+    current_json = json.loads(base64.b64decode(file_data["content"]).decode("utf-8"))
 
     # ------------------------------------------------------------------
     # 4. Update the config in memory
     # ------------------------------------------------------------------
 
-    # Key format depends on section:
-    # validators / read-only → "OrgName / SponsorName"
-    # svs / vpns             → "OrgName"
-    member_key = name if canonical_section in ("svs", "vpns") else f"{name} / {sponsor}"
-
+    # Key format: "OrgName / SponsorName" for validators/read-only, "OrgName" for svs/vpns
+    member_key   = name if canonical_section in ("svs", "vpns") else f"{name} / {sponsor}"
     section_data = current_json.setdefault(canonical_section, {})
     existing_ips = section_data.get(member_key, [])
 
-    # Add new IP in CIDR /32 notation (single host)
+    # Add new IP in CIDR /32 notation (single host address)
     new_ip_cidr = f"{ip}/32"
     if new_ip_cidr not in existing_ips:
         existing_ips.append(new_ip_cidr)
 
-    # Sort IPs numerically
+    # Sort IPs numerically (e.g. 10.0.0.2 before 10.0.0.10)
     existing_ips.sort(key=lambda x: [int(p) for p in x.split("/")[0].split(".")])
     section_data[member_key] = existing_ips
 
@@ -375,25 +372,37 @@ def api_submit():
     updated_json_str = json.dumps(current_json, indent=2) + "\n"
 
     # ------------------------------------------------------------------
-    # 5. Get main branch SHA and create a new branch (using PAT)
+    # 5. Sync the fork's main with upstream main
+    #    This prevents merge conflicts by making sure the fork is up to date.
     # ------------------------------------------------------------------
+    requests.post(
+        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/merge-upstream",
+        headers=pat_headers(),
+        json={"branch": "main"},
+        timeout=10,
+    )
+    # We don't fail if this errors — it just means the fork is already up to date
 
+    # ------------------------------------------------------------------
+    # 6. Get main SHA and create a new branch on the FORK
+    # ------------------------------------------------------------------
     safe_name   = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     branch_name = f"whitelist-{canonical_network.lower()}-{canonical_section.replace(' ', '-')}-{safe_name}"
 
+    # Read the fork's main HEAD SHA
     main_ref_resp = requests.get(
-        f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/git/ref/heads/main",
+        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/git/ref/heads/main",
         headers=pat_headers(),
         timeout=10,
     )
     if main_ref_resp.status_code != 200:
-        return jsonify({"error": f"Could not read main branch. Status: {main_ref_resp.status_code}"}), 500
+        return jsonify({"error": f"Could not read fork main branch. Status: {main_ref_resp.status_code}"}), 500
 
     main_sha = main_ref_resp.json()["object"]["sha"]
 
-    # Create the branch — 422 means it already exists, which is fine
+    # Create the new branch on the fork (422 = already exists, that's fine)
     create_branch_resp = requests.post(
-        f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/git/refs",
+        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/git/refs",
         headers=pat_headers(),
         json={"ref": f"refs/heads/{branch_name}", "sha": main_sha},
         timeout=10,
@@ -402,18 +411,28 @@ def api_submit():
         return jsonify({"error": f"Could not create branch: {create_branch_resp.text}"}), 500
 
     # ------------------------------------------------------------------
-    # 6. Commit the updated file (using PAT)
+    # 7. Commit the updated file to the fork branch
     # ------------------------------------------------------------------
+
+    # We need the file's SHA on the fork branch for the commit API
+    fork_file_resp = requests.get(
+        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/contents/{config_path}",
+        headers=pat_headers(),
+        params={"ref": branch_name},
+        timeout=10,
+    )
+    # Use the fork's file SHA if available, otherwise fall back to upstream SHA
+    fork_file_sha = fork_file_resp.json().get("sha", current_sha) if fork_file_resp.status_code == 200 else current_sha
 
     updated_b64 = base64.b64encode(updated_json_str.encode("utf-8")).decode("utf-8")
 
     commit_resp = requests.put(
-        f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/contents/{config_path}",
+        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/contents/{config_path}",
         headers=pat_headers(),
         json={
             "message": f"Add {name} to {canonical_section} on {canonical_network}",
             "content": updated_b64,
-            "sha":     current_sha,
+            "sha":     fork_file_sha,
             "branch":  branch_name,
         },
         timeout=10,
@@ -422,7 +441,7 @@ def api_submit():
         return jsonify({"error": f"Could not commit file: {commit_resp.text}"}), 500
 
     # ------------------------------------------------------------------
-    # 7. Open the PR (using PAT)
+    # 8. Open the PR from fork:branch → upstream:main
     # ------------------------------------------------------------------
 
     pr_title = f"Whitelist {name} on {canonical_network}"
@@ -437,8 +456,8 @@ def api_submit():
         json={
             "title": pr_title,
             "body":  pr_body,
-            "head":  branch_name,
-            "base":  "main",
+            "head":  f"{FORK_OWNER}:{branch_name}",  # fork:branch
+            "base":  "main",                           # upstream main
         },
         timeout=10,
     )
