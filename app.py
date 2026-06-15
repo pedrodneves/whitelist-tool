@@ -327,23 +327,39 @@ def api_submit():
     github_user = user_resp.json().get("login", "unknown") if user_resp.status_code == 200 else "unknown"
 
     # ------------------------------------------------------------------
-    # 3. Read the current config from the UPSTREAM repo
-    #    We read from upstream (canton-foundation) to always get the
-    #    latest version, even if the fork is behind.
+    # 3. Sync the fork's main branch with upstream FIRST
+    #    This must happen before reading the file so we get the latest
+    #    content and SHA from the fork — not a stale version.
+    #    Without this, PRs include all the commits the fork was behind.
     # ------------------------------------------------------------------
     config_path = f"configs/{canonical_network}/allowed-ip-ranges.json"
 
+    sync_resp = requests.post(
+        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/merge-upstream",
+        headers=pat_headers(),
+        json={"branch": "main"},
+        timeout=15,
+    )
+    # 200 = synced successfully, 409 = already up to date or conflict
+    if sync_resp.status_code not in (200, 409):
+        return jsonify({"error": f"Could not sync fork with upstream. Status: {sync_resp.status_code}"}), 500
+
+    # ------------------------------------------------------------------
+    # 4. Read the current config from the FORK (now in sync with upstream)
+    #    Reading from the fork gives us the correct file SHA we need
+    #    when committing — using the upstream SHA would cause a conflict.
+    # ------------------------------------------------------------------
     file_resp = requests.get(
-        f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/contents/{config_path}",
+        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/contents/{config_path}",
         headers=pat_headers(),
         timeout=10,
     )
 
     if file_resp.status_code != 200:
-        return jsonify({"error": f"Could not read {config_path} from upstream. Status: {file_resp.status_code}"}), 500
+        return jsonify({"error": f"Could not read {config_path} from fork. Status: {file_resp.status_code}"}), 500
 
     file_data    = file_resp.json()
-    current_sha  = file_data["sha"]
+    current_sha  = file_data["sha"]   # SHA from the fork — used when committing
     current_json = json.loads(base64.b64decode(file_data["content"]).decode("utf-8"))
 
     # ------------------------------------------------------------------
@@ -372,19 +388,7 @@ def api_submit():
     updated_json_str = json.dumps(current_json, indent=2) + "\n"
 
     # ------------------------------------------------------------------
-    # 5. Sync the fork's main with upstream main
-    #    This prevents merge conflicts by making sure the fork is up to date.
-    # ------------------------------------------------------------------
-    requests.post(
-        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/merge-upstream",
-        headers=pat_headers(),
-        json={"branch": "main"},
-        timeout=10,
-    )
-    # We don't fail if this errors — it just means the fork is already up to date
-
-    # ------------------------------------------------------------------
-    # 6. Get main SHA and create a new branch on the FORK
+    # 5. Get main SHA and create a new branch on the FORK
     # ------------------------------------------------------------------
     safe_name   = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     branch_name = f"whitelist-{canonical_network.lower()}-{canonical_section.replace(' ', '-')}-{safe_name}"
@@ -411,19 +415,10 @@ def api_submit():
         return jsonify({"error": f"Could not create branch: {create_branch_resp.text}"}), 500
 
     # ------------------------------------------------------------------
-    # 7. Commit the updated file to the fork branch
+    # 6. Commit the updated file to the fork branch
     # ------------------------------------------------------------------
 
-    # We need the file's SHA on the fork branch for the commit API
-    fork_file_resp = requests.get(
-        f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/contents/{config_path}",
-        headers=pat_headers(),
-        params={"ref": branch_name},
-        timeout=10,
-    )
-    # Use the fork's file SHA if available, otherwise fall back to upstream SHA
-    fork_file_sha = fork_file_resp.json().get("sha", current_sha) if fork_file_resp.status_code == 200 else current_sha
-
+    # current_sha already holds the fork's file SHA (read after sync above)
     updated_b64 = base64.b64encode(updated_json_str.encode("utf-8")).decode("utf-8")
 
     commit_resp = requests.put(
@@ -432,7 +427,7 @@ def api_submit():
         json={
             "message": f"Add {name} to {canonical_section} on {canonical_network}",
             "content": updated_b64,
-            "sha":     fork_file_sha,
+            "sha":     current_sha,
             "branch":  branch_name,
         },
         timeout=10,
@@ -441,7 +436,7 @@ def api_submit():
         return jsonify({"error": f"Could not commit file: {commit_resp.text}"}), 500
 
     # ------------------------------------------------------------------
-    # 8. Open the PR from fork:branch → upstream:main
+    # 7. Open the PR from fork:branch → upstream:main
     # ------------------------------------------------------------------
 
     pr_title = f"Whitelist {name} on {canonical_network}"
