@@ -61,7 +61,7 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 # CORS = Cross-Origin Resource Sharing.
 # Browsers block JS from calling APIs on a different domain by default.
 # This tells them it's OK for our GitHub Pages frontend to call this backend.
-CORS(app, origins=[os.environ.get("FRONTEND_URL", "*")], supports_credentials=True)
+CORS(app, origins="*", supports_credentials=False)
 
 # ---------------------------------------------------------------------------
 # Config — read everything from environment variables, never hardcode secrets
