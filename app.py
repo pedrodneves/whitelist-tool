@@ -419,7 +419,7 @@ def api_submit():
     # ------------------------------------------------------------------
     pr_title = f"Whitelist {name} on {canonical_network}"
     pr_body  = f"Submitted by @{github_user} via the whitelist tool.\n\n"
-    pr_body += f"Approval: {approval}" if approval else "DevNet only, no approval needed."
+    pr_body += f"Approval: {approval}" if approval else "DevNet only."
     if comment:
         pr_body += f"\n\n{comment}"
 
