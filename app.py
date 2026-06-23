@@ -108,6 +108,27 @@ def _extract_token() -> str | None:
         return None
     return auth_header[len("Bearer "):]
 
+def _resolve_network_and_section(network: str, section: str):
+    """
+    Resolve user-supplied network and section strings to their canonical forms.
+    Returns (canonical_network, canonical_section) or (None, None) on failure.
+    Used by both /api/check and /api/submit to keep the maps in one place.
+    """
+    network_map = {
+        "dev": "DevNet", "devnet": "DevNet",
+        "test": "TestNet", "testnet": "TestNet",
+        "main": "MainNet", "mainnet": "MainNet",
+    }
+    section_map = {
+        "validators": "validators", "v": "validators",
+        "svs": "svs", "vpns": "vpns",
+        "read-only-clients": "read-only clients", "read-only": "read-only clients",
+    }
+    return (
+        network_map.get(network.lower()),
+        section_map.get(section.lower()),
+    )
+
 # ---------------------------------------------------------------------------
 # OAuth routes
 # ---------------------------------------------------------------------------
@@ -184,6 +205,83 @@ def auth_user():
     })
 
 # ---------------------------------------------------------------------------
+# Duplicate org check
+# ---------------------------------------------------------------------------
+
+@app.route("/api/check", methods=["POST"])
+def api_check():
+    """
+    Check whether an organisation name already exists in a given network+section
+    of the upstream JSON file.
+
+    Called by the frontend before the PR is created, so the user sees a warning
+    if the org is already whitelisted and can decide whether to continue.
+
+    Request body (JSON):
+        network  — e.g. "dev", "test", "main"
+        section  — e.g. "validators", "svs"
+        name     — organisation name to check
+        sponsor  — sponsor name (used to build the member key for validators)
+
+    Response (JSON):
+        { "exists": true/false }        — on success
+        { "error": "..." }              — if inputs are invalid or upstream unreachable
+    """
+    token = _extract_token()
+    if not token:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data received"}), 400
+
+    # Pull and sanitize the fields we need
+    network = sanitize(data.get("network", ""))
+    section = sanitize(data.get("section", ""))
+    name    = sanitize(data.get("name",    ""))
+    sponsor = sanitize(data.get("sponsor", ""))
+
+    canonical_network, canonical_section = _resolve_network_and_section(network, section)
+
+    if not canonical_network:
+        return jsonify({"error": f"Invalid network '{network}'"}), 400
+    if not canonical_section:
+        return jsonify({"error": f"Invalid section '{section}'"}), 400
+    if not name:
+        return jsonify({"error": "Organisation name is required"}), 400
+
+    # Build the path to the JSON file in the upstream repo
+    config_path = f"configs/{canonical_network}/allowed-ip-ranges.json"
+
+    # Fetch the file from the upstream repo using the server-side PAT
+    upstream_resp = requests.get(
+        f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/contents/{config_path}",
+        headers=pat_headers(),
+        timeout=10,
+    )
+    if upstream_resp.status_code != 200:
+        # If we can't reach upstream, don't block the user — just return not found
+        return jsonify({"exists": False, "warning": "Could not reach upstream to verify"})
+
+    # Decode the base64-encoded file content GitHub returns
+    raw_json_str = base64.b64decode(upstream_resp.json()["content"]).decode("utf-8")
+    current_json = json.loads(raw_json_str)
+
+    # Build the member key exactly as /api/submit would
+    # SVs and VPNs use the plain org name; validators use "Name / Sponsor"
+    if canonical_section in ("svs", "vpns"):
+        member_key = name
+    else:
+        member_key = f"{name} / {sponsor}" if sponsor else name
+
+    # Check whether this key already appears under the correct section
+    section_data = current_json.get(canonical_section, {})
+    exists       = member_key in section_data
+
+    return jsonify({"exists": exists, "member_key": member_key})
+
+
+# ---------------------------------------------------------------------------
 # PR creation
 # ---------------------------------------------------------------------------
 
@@ -219,21 +317,10 @@ def api_submit():
 
     errors = []
 
-    network_map = {
-        "dev": "DevNet", "devnet": "DevNet",
-        "test": "TestNet", "testnet": "TestNet",
-        "main": "MainNet", "mainnet": "MainNet",
-    }
-    canonical_network = network_map.get(network.lower())
+    canonical_network, canonical_section = _resolve_network_and_section(network, section)
+
     if not canonical_network:
         errors.append(f"Invalid network '{network}'. Use dev, test, or main.")
-
-    section_map = {
-        "validators": "validators", "v": "validators",
-        "svs": "svs", "vpns": "vpns",
-        "read-only-clients": "read-only clients", "read-only": "read-only clients",
-    }
-    canonical_section = section_map.get(section.lower())
     if not canonical_section:
         errors.append(f"Invalid section '{section}'.")
 
