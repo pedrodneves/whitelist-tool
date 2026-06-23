@@ -319,10 +319,53 @@
       box-shadow: 0 0 0 3px var(--accent-glow);
     }
 
-    /* Highlight the name field red when a duplicate is detected */
+    /* Name field orange border when a duplicate is detected and unconfirmed */
     input#name.duplicate {
       border-color: var(--orange);
       box-shadow: 0 0 0 3px rgba(224,144,80,0.15);
+    }
+
+    /* -----------------------------------------------------------------------
+       Rotation checkbox — shown inside the duplicate warning banner
+    ----------------------------------------------------------------------- */
+    .rotation-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    /* Hide the native checkbox and replace with a styled square */
+    .rotation-check input[type="checkbox"] {
+      appearance: none;
+      width: 15px;
+      height: 15px;
+      border: 1px solid var(--orange);
+      border-radius: 3px;
+      background: transparent;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s, border-color 0.15s;
+      position: relative;
+    }
+
+    /* Checked state — fill with orange and show a tick */
+    .rotation-check input[type="checkbox"]:checked {
+      background: var(--orange);
+      border-color: var(--orange);
+    }
+    .rotation-check input[type="checkbox"]:checked::after {
+      content: "";
+      position: absolute;
+      left: 3px; top: 1px;
+      width: 5px; height: 8px;
+      border: 2px solid #0a0612;
+      border-top: none; border-left: none;
+      transform: rotate(45deg);
     }
 
     #ip {
@@ -720,9 +763,17 @@
       Visible only when /api/check returns { exists: true }.
       Blocked until the user changes the org name or network/section.
     -->
+    <!--
+      Duplicate warning — shown when /api/check returns { exists: true }.
+      User must tick the "IP rotation" checkbox to unblock submission.
+    -->
     <div id="duplicate-warning">
       <strong>⚠ Organisation already whitelisted</strong>
       <span id="duplicate-detail"></span>
+      <label class="rotation-check">
+        <input type="checkbox" id="rotation-checkbox" onchange="onRotationToggle()" />
+        This is an IP rotation — add the new IP to the existing entry
+      </label>
     </div>
 
     <!-- Sponsor -->
@@ -835,6 +886,7 @@
   const nameInput        = document.getElementById("name");
   const terminalEl       = document.getElementById("terminal");
   const terminalBody     = document.getElementById("terminal-body");
+  const rotationCheckbox = document.getElementById("rotation-checkbox");
 
   // Form fields
   const fields = {
@@ -852,7 +904,8 @@
   // =========================================================================
   let accessToken   = null;   // GitHub OAuth access token
   let isDuplicate   = false;  // true when /api/check reports the org exists
-  let checkTimer    = null;   // debounce timer for the duplicate check
+  let checkTimer          = null;   // debounce timer for the duplicate check
+  let isRotationConfirmed = false;  // true when user ticks the rotation checkbox
 
   // =========================================================================
   // Initialisation — runs as soon as the page loads
@@ -1076,26 +1129,49 @@
 
   /**
    * Show the orange duplicate-warning banner and mark the name field.
-   * Also disables the submit button until the issue is resolved.
+   *
+   * This is a SOFT warning — submission is still allowed because the org
+   * may be rotating or adding an IP. The banner explains this so the
+   * reviewer knows what to expect when they see the PR.
    *
    * @param {string} memberKey  — the exact key found in the JSON (e.g. "Fiews / Digital-Asset")
    * @param {string} network    — "dev", "test", or "main" (shown in the message)
    */
+  /**
+   * Show the duplicate warning banner and block submission.
+   * The user must tick the "IP rotation" checkbox to unblock.
+   */
   function showDuplicateWarning(memberKey, network) {
     isDuplicate = true;
 
-    // Compose a helpful message pointing to exactly what was found
+    // Reset the checkbox and lock state every time a new duplicate is detected
+    isRotationConfirmed    = false;
+    rotationCheckbox.checked = false;
+    submitBtn.disabled     = true;
+
     const networkLabel = { dev: "DevNet", test: "TestNet", main: "MainNet" }[network] || network;
-    dupDetail.textContent = `"${memberKey}" already exists in ${networkLabel}. Change the org name or choose a different network.`;
+    dupDetail.textContent =
+      `"${memberKey}" is already whitelisted in ${networkLabel}. ` +
+      `Tick the checkbox below if you are rotating or adding an IP, otherwise change the org name.`;
 
     dupWarning.style.display = "block";
-    nameInput.classList.add("duplicate");   // orange border on the input
-    submitBtn.disabled = true;
+    nameInput.classList.add("duplicate");
   }
 
-  /** Hide the duplicate warning and re-enable the submit button. */
+  /**
+   * Called every time the rotation checkbox changes.
+   * Enables or disables the submit button based on whether it is ticked.
+   */
+  function onRotationToggle() {
+    isRotationConfirmed = rotationCheckbox.checked;
+    submitBtn.disabled  = !isRotationConfirmed;
+  }
+
+  /** Hide the duplicate warning and fully reset all related state. */
   function hideDuplicateWarning() {
-    isDuplicate = false;
+    isDuplicate            = false;
+    isRotationConfirmed    = false;
+    rotationCheckbox.checked = false;
     dupWarning.style.display = "none";
     nameInput.classList.remove("duplicate");
     submitBtn.disabled = false;
@@ -1164,11 +1240,13 @@
   async function handleSubmit() {
     const v = getValues();
 
-    // Basic client-side guard — the duplicate check also guards, but belt-and-braces
-    if (isDuplicate) {
-      showResult("Organisation already exists in the selected network.", false);
+    // Block if the org is a duplicate and the user has not confirmed it's a rotation
+    if (isDuplicate && !isRotationConfirmed) {
+      showResult("Organisation already whitelisted. Tick the IP rotation checkbox to continue.", false);
       return;
     }
+
+    // Basic client-side guard
     if (!v.network || !v.section || !v.name || !v.ip) {
       showResult("Please fill in all required fields.", false);
       return;
@@ -1184,6 +1262,12 @@
     log(`Starting PR creation for <strong>${v.name}</strong>`, "info", true);
     log(`Target: ${({ dev: "DevNet", test: "TestNet", main: "MainNet" })[v.network]} / ${v.section}`, "info");
     log(`IP: ${v.ip}/32`, "info");
+
+    // Flag in the terminal if the user confirmed this is a rotation
+    if (isRotationConfirmed) {
+      log("⚠ Org already whitelisted — user confirmed IP rotation / addition", "warn");
+    }
+
     log("Authenticating with GitHub…", "step", true);
 
     try {
