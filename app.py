@@ -374,11 +374,24 @@ def api_submit():
     section_data = current_json.setdefault(canonical_section, {})
     existing_ips = section_data.get(member_key, [])
 
-    new_ip_cidr = f"{ip}/32"
-    if new_ip_cidr not in existing_ips:
-        existing_ips.append(new_ip_cidr)
+    # Remember whether this org already had IPs — used in the PR body below
+    is_rotation = len(existing_ips) > 0
 
-    # Sort IPs numerically
+    new_ip_cidr = f"{ip}/32"
+
+    # If the IP is already present for this member, abort early with a clear
+    # error rather than creating an empty commit (Files changed: 0).
+    if new_ip_cidr in existing_ips:
+        return jsonify({
+            "error": (
+                f"{new_ip_cidr} is already whitelisted for '{member_key}' "
+                f"on {canonical_network}. No changes were made."
+            )
+        }), 400
+
+    existing_ips.append(new_ip_cidr)
+
+    # Sort IPs numerically (so 10.0.0.2 comes before 10.0.0.10)
     existing_ips.sort(key=lambda x: [int(p) for p in x.split("/")[0].split(".")])
     section_data[member_key] = existing_ips
 
@@ -390,6 +403,16 @@ def api_submit():
     # ensure_ascii=False preserves unicode characters like accented letters
     # exactly as they appear in the original file — no \uXXXX escaping
     updated_json_str = json.dumps(current_json, indent=2, ensure_ascii=False) + "\n"
+
+    # Safety net: if the serialised result is byte-for-byte identical to what
+    # we read, abort rather than push an empty commit.
+    if updated_json_str == raw_json_str:
+        return jsonify({
+            "error": (
+                f"No changes detected after applying the update for '{member_key}'. "
+                "The IP may already be present in the file. No PR was created."
+            )
+        }), 400
 
     # ------------------------------------------------------------------
     # 5. Get upstream's HEAD commit SHA and tree SHA
@@ -506,6 +529,8 @@ def api_submit():
     # ------------------------------------------------------------------
     pr_title = f"Whitelist {name} on {canonical_network}"
     pr_body  = f"Submitted by @{github_user} via the whitelist tool.\n\n"
+    if is_rotation:
+        pr_body += f"**Note:** `{member_key}` already exists in this section — this PR adds or rotates an IP.\n\n"
     pr_body += f"Approval: {approval}" if approval else "DevNet only."
     if comment:
         pr_body += f"\n\n{comment}"
