@@ -938,19 +938,25 @@
   let isRotationConfirmed = false;  // true when user ticks the rotation checkbox
   let sponsorType         = "sponsor"; // "sponsor" | "naas" — controls which dropdown list is shown
 
-  // Sponsor dropdown options — the current list of Canton Network sponsors
+  // Sponsor dropdown options — values must match the canonical keys in the upstream JSON exactly
   const SPONSOR_OPTIONS = [
-    { value: "",                               label: "— select —" },
-    { value: "Global-Synchronizer-Foundation", label: "Canton Foundation" },
-    { value: "C7",                             label: "C7" },
-    { value: "Cumberland",                     label: "Cumberland" },
-    { value: "Digital-Asset",                  label: "Digital Asset" },
-    { value: "5-north",                        label: "5 North" },
-    { value: "Liberty-City-Ventures",          label: "Liberty City Ventures" },
-    { value: "MPCH",                           label: "MPCH" },
-    { value: "Orb-1",                          label: "Orb 1" },
-    { value: "Proof-Group",                    label: "Proof Group" },
-    { value: "Tradeweb",                       label: "Tradeweb" },
+    { value: "",                              label: "— select —" },
+    { value: "Global-Synchronizer-Foundation",label: "Canton Foundation" },
+    { value: "C7-Technology-Services-Limited",label: "C7" },
+    { value: "Cumberland",                    label: "Cumberland" },
+    { value: "Cumberland-1",                  label: "Cumberland1" },
+    { value: "Digital-Asset",                 label: "Digital Asset" },
+    { value: "Digital-Asset-1",               label: "Digital Asset1" },
+    { value: "Digital-Asset-2",               label: "Digital Asset2" },
+    { value: "Five-North",                    label: "5 North" },
+    { value: "Five-North-1",                  label: "5 North1" },
+    { value: "Liberty-City-Ventures",         label: "Liberty City Ventures" },
+    { value: "MPC-Holding-Inc",               label: "MPCH" },
+    { value: "Orb-1-LP-1",                    label: "Orb 1" },
+    { value: "Proof-Group",                   label: "Proof Group" },
+    { value: "Proof-Group-1",                 label: "Proof Group1" },
+    { value: "Tradeweb",                      label: "Tradeweb" },
+    { value: "Tradeweb-Markets-1",            label: "Tradeweb1" },
   ];
 
   // NaaS (Node as a Service) provider options
