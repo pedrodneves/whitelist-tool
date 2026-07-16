@@ -415,6 +415,41 @@
     }
 
     /* -----------------------------------------------------------------------
+       Sponsor / NaaS toggle pill
+       Sits inline on the label row, lets the user switch the dropdown list.
+    ----------------------------------------------------------------------- */
+    .type-toggle {
+      display: inline-flex;
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: 20px;
+      padding: 2px;
+      gap: 2px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    .type-toggle button {
+      background: none;
+      border: none;
+      border-radius: 16px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-family: var(--ui);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 2px 9px;
+      transition: background 0.15s, color 0.15s;
+      line-height: 1.6;
+    }
+
+    .type-toggle button.active {
+      background: var(--border-2);
+      color: var(--accent);
+    }
+
+    /* -----------------------------------------------------------------------
        Command preview
     ----------------------------------------------------------------------- */
     .preview-label {
@@ -778,29 +813,18 @@
 
     <!-- Sponsor -->
     <div class="field" id="sponsor-field">
-      <label for="sponsor">
-        Sponsor
+      <label>
+        <span id="sponsor-label-text">Sponsor</span>
+        <!-- Toggle pill: switches the dropdown between Sponsor and NaaS lists -->
+        <span class="type-toggle">
+          <button id="toggle-sponsor" class="active" onclick="setSponsorType('sponsor')">Sponsor</button>
+          <button id="toggle-naas"               onclick="setSponsorType('naas')">NaaS</button>
+        </span>
         <span class="hint">— not required for svs / vpns</span>
       </label>
       <div class="select-wrap">
         <select id="sponsor">
-          <option value="">— select —</option>
-          <option value="Global-Synchronizer-Foundation">Canton Foundation</option>
-          <option value="C7-Technology-Services-Limited">C7</option>
-          <option value="Cumberland">Cumberland</option>
-          <option value="Cumberland-1">Cumberland1</option>
-          <option value="Digital-Asset">Digital Asset</option>
-          <option value="Digital-Asset-1">Digital Asset1</option>
-          <option value="Digital-Asset-2">Digital Asset2</option>
-          <option value="Five-North">5 North</option>
-          <option value="Five-North-1">5 North1</option>
-          <option value="Liberty-City-Ventures">Liberty City Ventures</option>
-          <option value="MPC-Holding-Inc">MPCH</option>
-          <option value="Orb-1-LP-1">Orb 1</option>
-          <option value="Proof-Group">Proof Group</option>
-          <option value="Proof-Group-1">Proof Group1</option>
-          <option value="Tradeweb">Tradeweb</option>
-          <option value="Tradeweb-Markets-1">Tradeweb1</option>
+          <!-- Options are injected by JS based on the active toggle -->
         </select>
       </div>
     </div>
@@ -912,6 +936,114 @@
   let isDuplicate   = false;  // true when /api/check reports the org exists
   let checkTimer          = null;   // debounce timer for the duplicate check
   let isRotationConfirmed = false;  // true when user ticks the rotation checkbox
+  let sponsorType         = "sponsor"; // "sponsor" | "naas" — controls which dropdown list is shown
+
+  // Sponsor dropdown options — the current list of Canton Network sponsors
+  const SPONSOR_OPTIONS = [
+    { value: "",                               label: "— select —" },
+    { value: "Global-Synchronizer-Foundation", label: "Canton Foundation" },
+    { value: "C7",                             label: "C7" },
+    { value: "Cumberland",                     label: "Cumberland" },
+    { value: "Digital-Asset",                  label: "Digital Asset" },
+    { value: "5-north",                        label: "5 North" },
+    { value: "Liberty-City-Ventures",          label: "Liberty City Ventures" },
+    { value: "MPCH",                           label: "MPCH" },
+    { value: "Orb-1",                          label: "Orb 1" },
+    { value: "Proof-Group",                    label: "Proof Group" },
+    { value: "Tradeweb",                       label: "Tradeweb" },
+  ];
+
+  // NaaS (Node as a Service) provider options
+  const NAAS_OPTIONS = [
+    { value: "",                        label: "— select —" },
+    { value: "5North",                  label: "5North" },
+    { value: "Alchemy",                 label: "Alchemy" },
+    { value: "BCW",                     label: "BCW" },
+    { value: "BitGo",                   label: "BitGo" },
+    { value: "Blockdaemon",             label: "Blockdaemon" },
+    { value: "C7",                      label: "C7" },
+    { value: "ChainSafe",               label: "ChainSafe" },
+    { value: "Copper",                  label: "Copper" },
+    { value: "DFNS",                    label: "DFNS" },
+    { value: "DigiK",                   label: "DigiK" },
+    { value: "DSRV",                    label: "DSRV" },
+    { value: "Edgevana",                label: "Edgevana" },
+    { value: "Everstake",               label: "Everstake" },
+    { value: "Figment",                 label: "Figment" },
+    { value: "Finoa-Consensus-Services",label: "Finoa Consensus Services" },
+    { value: "Gateway.fm",              label: "Gateway.fm" },
+    { value: "GlobalStake",             label: "GlobalStake" },
+    { value: "Hinode-Technologies",     label: "Hinode Technologies" },
+    { value: "HydraX",                  label: "HydraX" },
+    { value: "InfraSingularity",        label: "InfraSingularity" },
+    { value: "IntellectEU",             label: "IntellectEU" },
+    { value: "K2F-Labs",                label: "K2F Labs" },
+    { value: "Kaleido",                 label: "Kaleido" },
+    { value: "Kiln",                    label: "Kiln" },
+    { value: "Launchnodes",             label: "Launchnodes" },
+    { value: "Lightshift",              label: "Lightshift" },
+    { value: "Liquify",                 label: "Liquify" },
+    { value: "Luganodes",               label: "Luganodes" },
+    { value: "Meria",                   label: "Meria" },
+    { value: "MPCH",                    label: "MPCH" },
+    { value: "Next-Finance-Tech",       label: "Next Finance Tech" },
+    { value: "Node-Monster",            label: "Node Monster" },
+    { value: "Nodeinfra",               label: "Nodeinfra" },
+    { value: "NodeOps",                 label: "NodeOps" },
+    { value: "Noders-LLC",              label: "Noders LLC" },
+    { value: "Obsidian",                label: "Obsidian" },
+    { value: "Ownera",                  label: "Ownera" },
+    { value: "P-OPS-Team",              label: "P-OPS Team" },
+    { value: "P2P-Staking",             label: "P2P Staking" },
+    { value: "Pier-Two",                label: "Pier Two" },
+    { value: "ProofGroup",              label: "ProofGroup" },
+    { value: "Republic",                label: "Republic" },
+    { value: "Saxon",                   label: "Saxon" },
+    { value: "Sekoya-Labs",             label: "Sekoya Labs" },
+    { value: "SenseiNode",              label: "SenseiNode" },
+    { value: "StakeCraft",              label: "StakeCraft" },
+    { value: "SV-NodeOps",              label: "SV NodeOps" },
+    { value: "Tenkai-GmbH",             label: "Tenkai GmbH" },
+    { value: "The-Tie",                 label: "The Tie" },
+    { value: "Tradeweb",                label: "Tradeweb" },
+    { value: "Unit-410",                label: "Unit 410" },
+    { value: "Validation-Cloud",        label: "Validation Cloud" },
+    { value: "WolfEdge-Labs",           label: "WolfEdge Labs" },
+    { value: "Zenith",                  label: "Zenith" },
+    { value: "Zodia-Custody-Limited",   label: "Zodia Custody Limited" },
+  ];
+
+  /**
+   * Switch the sponsor dropdown between the Sponsor and NaaS lists.
+   * Repopulates the <select> options and updates the toggle pill + label.
+   *
+   * @param {"sponsor"|"naas"} type
+   */
+  function setSponsorType(type) {
+    sponsorType = type;
+
+    // Update pill button active states
+    document.getElementById("toggle-sponsor").classList.toggle("active", type === "sponsor");
+    document.getElementById("toggle-naas").classList.toggle("active",    type === "naas");
+
+    // Update the field label text
+    document.getElementById("sponsor-label-text").textContent =
+      type === "naas" ? "NaaS Provider" : "Sponsor";
+
+    // Repopulate the dropdown with the correct list
+    const options = type === "naas" ? NAAS_OPTIONS : SPONSOR_OPTIONS;
+    const select  = fields.sponsor;
+    select.innerHTML = "";
+    options.forEach(({ value, label }) => {
+      const opt   = document.createElement("option");
+      opt.value   = value;
+      opt.textContent = label;
+      select.appendChild(opt);
+    });
+
+    // Trigger preview + duplicate check refresh
+    updatePreview();
+  }
 
   // =========================================================================
   // Initialisation — runs as soon as the page loads
@@ -991,6 +1123,8 @@
   function showAppScreen() {
     loginScreen.style.display = "none";
     appScreen.style.display   = "flex";
+    // Populate the sponsor dropdown with the default (Sponsor) list on first show
+    setSponsorType("sponsor");
   }
 
   function showLoginError(msg) {
