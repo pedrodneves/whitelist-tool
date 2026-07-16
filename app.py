@@ -108,6 +108,62 @@ def _extract_token() -> str | None:
         return None
     return auth_header[len("Bearer "):]
 
+def _check_canton_membership(user_token: str) -> tuple[bool, str]:
+    """
+    Verify the authenticated user is a member of the canton-foundation/sv-ops
+    GitHub team. This is the team that contains all validator operators who are
+    authorised to submit whitelist PRs.
+
+    We use the server-side PAT for the team membership check (requires org:read
+    scope) but the user's own token to identify their login first.
+
+    Returns:
+        (True,  "")        — confirmed sv-ops team member
+        (False, "reason")  — not a member or check failed
+    """
+    # Step 1: get the user's login from their own OAuth token
+    user_resp = requests.get(
+        f"{GITHUB_API}/user",
+        headers=user_headers(user_token),
+        timeout=10,
+    )
+    if user_resp.status_code != 200:
+        return False, "Could not retrieve your GitHub profile."
+
+    login = user_resp.json().get("login")
+    if not login:
+        return False, "Could not determine your GitHub username."
+
+    # Step 2: check membership in either the sv-ops or admins team using the PAT.
+    # Access is granted if the user is an active member of at least one of them.
+    # GET /orgs/{org}/teams/{team_slug}/memberships/{username}
+    #   200 = member (check state field for "active" vs "pending")
+    #   404 = not a member or team does not exist
+    ALLOWED_TEAMS = ("sv-ops", "admins")
+
+    for team_slug in ALLOWED_TEAMS:
+        team_resp = requests.get(
+            f"{GITHUB_API}/orgs/canton-foundation/teams/{team_slug}/memberships/{login}",
+            headers=pat_headers(),   # PAT has org read access; user token may not
+            timeout=10,
+        )
+        if team_resp.status_code == 200:
+            state = team_resp.json().get("state", "")
+            if state == "active":
+                return True, ""
+            # Pending on one team — keep checking the other before rejecting
+            if state == "pending":
+                return False, (
+                    f"@{login} has a pending invitation to the {team_slug} team. "
+                    "Please accept the invitation before using this tool."
+                )
+
+    return False, (
+        f"@{login} is not a member of the canton-foundation/sv-ops or admins team. "
+        "Access is restricted to members of those teams only."
+    )
+
+
 def _resolve_network_and_section(network: str, section: str):
     """
     Resolve user-supplied network and section strings to their canonical forms.
@@ -231,6 +287,11 @@ def api_check():
     if not token:
         return jsonify({"error": "Not authenticated"}), 401
 
+    # Verify the user belongs to canton-foundation before doing anything
+    is_member, reason = _check_canton_membership(token)
+    if not is_member:
+        return jsonify({"error": reason}), 403
+
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data received"}), 400
@@ -299,6 +360,11 @@ def api_submit():
         return jsonify({"error": "Not authenticated"}), 401
     if not GITHUB_PAT:
         return jsonify({"error": "Server is missing GITHUB_PAT environment variable."}), 500
+
+    # Verify the user belongs to canton-foundation before doing anything
+    is_member, reason = _check_canton_membership(token)
+    if not is_member:
+        return jsonify({"error": reason}), 403
 
     # ------------------------------------------------------------------
     # 1. Validate inputs
