@@ -108,18 +108,68 @@ def _extract_token() -> str | None:
         return None
     return auth_header[len("Bearer "):]
 
+def _fetch_allowed_users() -> set[str] | None:
+    """
+    Fetch org/teams.tf from canton-foundation/github and parse out every GitHub
+    username listed under the 'sv-ops' and 'admins' team blocks.
+
+    Returns a lowercase set of allowed usernames, or None if the file
+    could not be fetched (caller should fail open or closed as appropriate).
+
+    Parsing strategy: find each team block by its header string, then extract
+    all quoted identifiers that look like GitHub usernames within that block.
+    This is intentionally simple — no full HCL parser needed since the file
+    format is consistent and we only care about the member lists.
+    """
+    resp = requests.get(
+        f"{GITHUB_API}/repos/canton-foundation/github/contents/org/teams.tf",
+        headers=pat_headers(),
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        return None
+
+    # GitHub returns the file base64-encoded
+    raw = base64.b64decode(resp.json()["content"]).decode("utf-8")
+
+    allowed = set()
+    # Parse each team block we care about
+    for team_name in ("sv-ops", "admins"):
+        # Find the opening of this team block: "sv-ops" = {
+        block_start = raw.find(f'"{team_name}"')
+        if block_start == -1:
+            continue
+
+        # Find the members = [ ... ] list within this block
+        members_start = raw.find("members = [", block_start)
+        if members_start == -1:
+            continue
+
+        # Find the closing bracket of the members list
+        members_end = raw.find("]", members_start)
+        if members_end == -1:
+            continue
+
+        # Extract all quoted strings inside the members list
+        # GitHub usernames only contain alphanumerics, hyphens, and dots
+        members_block = raw[members_start:members_end]
+        usernames = re.findall(r'"([A-Za-z0-9][A-Za-z0-9\-\.]+)"', members_block)
+        allowed.update(u.lower() for u in usernames)
+
+    return allowed
+
+
 def _check_canton_membership(user_token: str) -> tuple[bool, str]:
     """
-    Verify the authenticated user is a member of the canton-foundation/sv-ops
-    GitHub team. This is the team that contains all validator operators who are
-    authorised to submit whitelist PRs.
+    Verify the authenticated user appears in the sv-ops or admins team in
+    canton-foundation/github/org/teams.tf — the Terraform source of truth.
 
-    We use the server-side PAT for the team membership check (requires org:read
-    scope) but the user's own token to identify their login first.
+    Fetches and parses the file live on every call so access changes take
+    effect immediately when teams.tf is updated, with no redeployment needed.
 
     Returns:
-        (True,  "")        — confirmed sv-ops team member
-        (False, "reason")  — not a member or check failed
+        (True,  "")        — username found in an allowed team
+        (False, "reason")  — not found, or file could not be fetched
     """
     # Step 1: get the user's login from their own OAuth token
     user_resp = requests.get(
@@ -134,32 +184,23 @@ def _check_canton_membership(user_token: str) -> tuple[bool, str]:
     if not login:
         return False, "Could not determine your GitHub username."
 
-    # Step 2: check membership in either the sv-ops or admins team using the PAT.
-    # Access is granted if the user is an active member of at least one of them.
-    # GET /orgs/{org}/teams/{team_slug}/memberships/{username}
-    #   200 = member (check state field for "active" vs "pending")
-    #   404 = not a member or team does not exist
-    ALLOWED_TEAMS = ("sv-ops", "admins")
+    # Step 2: fetch the live allowlist from teams.tf
+    allowed_users = _fetch_allowed_users()
 
-    for team_slug in ALLOWED_TEAMS:
-        team_resp = requests.get(
-            f"{GITHUB_API}/orgs/canton-foundation/teams/{team_slug}/memberships/{login}",
-            headers=pat_headers(),   # PAT has org read access; user token may not
-            timeout=10,
+    if allowed_users is None:
+        # Could not reach the repo — fail closed: deny access rather than
+        # accidentally allowing an unauthorised user through
+        return False, (
+            "Could not fetch the authorised user list from canton-foundation/github. "
+            "Please try again in a moment."
         )
-        if team_resp.status_code == 200:
-            state = team_resp.json().get("state", "")
-            if state == "active":
-                return True, ""
-            # Pending on one team — keep checking the other before rejecting
-            if state == "pending":
-                return False, (
-                    f"@{login} has a pending invitation to the {team_slug} team. "
-                    "Please accept the invitation before using this tool."
-                )
+
+    # Step 3: case-insensitive username check (GitHub usernames are case-insensitive)
+    if login.lower() in allowed_users:
+        return True, ""
 
     return False, (
-        f"@{login} is not a member of the canton-foundation/sv-ops or admins team. "
+        f"@{login} is not listed in the canton-foundation sv-ops or admins team. "
         "Access is restricted to members of those teams only."
     )
 
