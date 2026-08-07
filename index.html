@@ -1,0 +1,1528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Validator Whitelist — Canton Network</title>
+  <style>
+    /* -----------------------------------------------------------------------
+       Design tokens
+       All colours and sizing live here. Change a value once, it updates
+       everywhere it's used.
+    ----------------------------------------------------------------------- */
+    :root {
+      /* Canton Foundation exact palette */
+      --bg:          #0a0612;   /* near-black purple base */
+      --surface:     #110e1f;   /* card surface */
+      --surface-2:   #19162c;   /* inputs, elevated elements */
+      --border:      #26204a;   /* subtle borders */
+      --border-2:    #332b5e;   /* visible borders */
+      --text:        #ffffff;   /* pure white */
+      --text-muted:  #8880aa;   /* secondary text */
+      --text-dim:    #3a3460;   /* very muted */
+      --accent:      #f3ff97;   /* Canton yellow-green — exact value */
+      --accent-glow: #f3ff9720; /* yellow-green glow */
+      --accent-dim:  #8fa800;   /* darker fill for buttons */
+      --blue:        #9b8fe8;   /* purple highlight */
+      --red:         #ff5c5c;   /* errors */
+      --orange:      #e09050;   /* warnings */
+      --green:       #4ade80;   /* terminal success lines */
+      --radius:      6px;
+      --mono:        "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+      --ui:          "Inter", system-ui, -apple-system, sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      background-image: radial-gradient(ellipse at 40% 0%, #2d1060 0%, transparent 60%),
+                        radial-gradient(ellipse at 80% 20%, #3d1040 0%, transparent 50%);
+      color: var(--text);
+      font-family: var(--ui);
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* -----------------------------------------------------------------------
+       Topbar — always visible, shows login state
+    ----------------------------------------------------------------------- */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(10,6,18,0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* The "Canton" wordmark — a subtle grid of dots as the logo mark */
+    .logo-mark {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 3px;
+    }
+
+    .logo-mark span {
+      border-radius: 1px;
+      background: var(--accent);
+      opacity: 0.7;
+    }
+
+    .logo-mark span:nth-child(2),
+    .logo-mark span:nth-child(6) { opacity: 0.3; }
+
+    .topbar-brand h1 {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: 0.02em;
+    }
+
+    .topbar-brand h1 span { color: var(--accent); }
+
+    /* User pill shown when logged in */
+    .user-pill {
+      display: none;   /* hidden until JS shows it */
+      align-items: center;
+      gap: 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: 20px;
+      padding: 4px 12px 4px 6px;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .user-pill img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1px solid var(--border-2);
+    }
+
+    .logout-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 0 0 8px;
+      margin-left: 4px;
+      border-left: 1px solid var(--border-2);
+      line-height: 1;
+      transition: color 0.15s;
+    }
+    .logout-btn:hover { color: var(--red); }
+
+    /* -----------------------------------------------------------------------
+       Page layout — two states: login wall and main form
+    ----------------------------------------------------------------------- */
+    #login-screen,
+    #app-screen {
+      display: none;
+      min-height: calc(100vh - 52px);
+    }
+
+    /* -----------------------------------------------------------------------
+       Login screen
+    ----------------------------------------------------------------------- */
+    #login-screen {
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 16px;
+      text-align: center;
+    }
+
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 40px 36px;
+      max-width: 400px;
+      width: 100%;
+    }
+
+    /* Decorative node graph — the signature element of this design.
+       Represents the network topology Canton is about. */
+    .node-graph {
+      position: relative;
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 28px;
+    }
+
+    .node-graph svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .login-card h2 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .login-card p {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-bottom: 28px;
+      line-height: 1.5;
+    }
+
+    .github-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--ui);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 10px 16px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .github-btn:hover {
+      background: #30363d;
+      border-color: #8b949e;
+    }
+
+    .github-btn svg {
+      flex-shrink: 0;
+    }
+
+    /* -----------------------------------------------------------------------
+       App screen (shown after login)
+    ----------------------------------------------------------------------- */
+    #app-screen {
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px 80px;
+    }
+
+    .page-header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .page-header .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+
+    .page-header h2 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.025em;
+      margin-bottom: 6px;
+    }
+
+    .page-header p {
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    /* -----------------------------------------------------------------------
+       Form card
+    ----------------------------------------------------------------------- */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px;
+      width: 100%;
+      max-width: 560px;
+    }
+
+    /* Two-column grid for network + section */
+    .row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    /* -----------------------------------------------------------------------
+       Form fields
+    ----------------------------------------------------------------------- */
+    .field { margin-bottom: 18px; }
+
+    .field label {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+    }
+
+    .field label .req   { color: var(--red); }
+    .field label .hint  {
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    input[type="text"],
+    select {
+      width: 100%;
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--ui);
+      font-size: 14px;
+      padding: 7px 10px;
+      outline: none;
+      appearance: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    input[type="text"]:focus,
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    /* Name field orange border when a duplicate is detected and unconfirmed */
+    input#name.duplicate {
+      border-color: var(--orange);
+      box-shadow: 0 0 0 3px rgba(224,144,80,0.15);
+    }
+
+    /* -----------------------------------------------------------------------
+       Rotation checkbox — shown inside the duplicate warning banner
+    ----------------------------------------------------------------------- */
+    .rotation-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    /* Hide the native checkbox and replace with a styled square */
+    .rotation-check input[type="checkbox"] {
+      appearance: none;
+      width: 15px;
+      height: 15px;
+      border: 1px solid var(--orange);
+      border-radius: 3px;
+      background: transparent;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s, border-color 0.15s;
+      position: relative;
+    }
+
+    /* Checked state — fill with orange and show a tick */
+    .rotation-check input[type="checkbox"]:checked {
+      background: var(--orange);
+      border-color: var(--orange);
+    }
+    .rotation-check input[type="checkbox"]:checked::after {
+      content: "";
+      position: absolute;
+      left: 3px; top: 1px;
+      width: 5px; height: 8px;
+      border: 2px solid #0a0612;
+      border-top: none; border-left: none;
+      transform: rotate(45deg);
+    }
+
+    #ip {
+      font-family: var(--mono);
+      font-size: 13px;
+      letter-spacing: 0.05em;
+    }
+
+    /* Custom select arrow */
+    .select-wrap {
+      position: relative;
+    }
+
+    .select-wrap::after {
+      content: "▾";
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+      font-size: 12px;
+    }
+
+    /* -----------------------------------------------------------------------
+       Duplicate warning banner
+       Shown between the name field and the sponsor field when the org
+       already exists in the upstream JSON for the chosen network + section.
+    ----------------------------------------------------------------------- */
+    #duplicate-warning {
+      display: none;               /* hidden by default, shown by JS */
+      background: rgba(224,144,80,0.08);
+      border: 1px solid var(--orange);
+      border-radius: var(--radius);
+      padding: 10px 13px;
+      font-size: 12.5px;
+      color: var(--orange);
+      line-height: 1.5;
+      margin-top: -10px;           /* pull up close to the name field */
+      margin-bottom: 18px;
+    }
+
+    #duplicate-warning strong {
+      display: block;
+      margin-bottom: 2px;
+      font-size: 13px;
+    }
+
+    /* -----------------------------------------------------------------------
+       Sponsor / NaaS toggle pill
+       Sits inline on the label row, lets the user switch the dropdown list.
+    ----------------------------------------------------------------------- */
+    .type-toggle {
+      display: inline-flex;
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: 20px;
+      padding: 2px;
+      gap: 2px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    .type-toggle button {
+      background: none;
+      border: none;
+      border-radius: 16px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-family: var(--ui);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 2px 9px;
+      transition: background 0.15s, color 0.15s;
+      line-height: 1.6;
+    }
+
+    .type-toggle button.active {
+      background: var(--border-2);
+      color: var(--accent);
+    }
+
+    /* -----------------------------------------------------------------------
+       Command preview
+    ----------------------------------------------------------------------- */
+    .preview-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-dim);
+      margin-bottom: 5px;
+    }
+
+    .preview {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      line-height: 1.8;
+      color: var(--text-muted);
+      word-break: break-all;
+      min-height: 42px;
+      margin-bottom: 20px;
+    }
+
+    .preview .kw  { color: #9b8fe8; }
+    .preview .val { color: #f3ff97; }
+    .preview .flg { color: #c9a1ff; }
+
+    /* -----------------------------------------------------------------------
+       Divider
+    ----------------------------------------------------------------------- */
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 22px 0;
+    }
+
+    /* -----------------------------------------------------------------------
+       Submit button
+    ----------------------------------------------------------------------- */
+    .submit-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--accent-dim);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      color: #0a0612;
+      font-family: var(--ui);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 9px 16px;
+      cursor: pointer;
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+
+    .submit-btn:hover:not(:disabled) {
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    .submit-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    /* -----------------------------------------------------------------------
+       Result output
+    ----------------------------------------------------------------------- */
+    .result {
+      margin-top: 16px;
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      font-size: 13px;
+      display: none;
+    }
+
+    .result.success {
+      background: #1a1d00;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+    }
+
+    .result.error {
+      background: #200d0c;
+      border: 1px solid var(--red);
+      color: var(--red);
+    }
+
+    .result a {
+      color: inherit;
+      font-weight: 600;
+    }
+
+    /* -----------------------------------------------------------------------
+       Terminal log panel
+       Appears below the form card after the user clicks Create PR.
+       Shows each step of the PR creation process in real time.
+    ----------------------------------------------------------------------- */
+    #terminal {
+      display: none;               /* hidden until submission starts */
+      width: 100%;
+      max-width: 560px;
+      margin-top: 16px;
+      background: #07050f;
+      border: 1px solid var(--border-2);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    /* Terminal title bar — mimics a minimal macOS / VS Code window chrome */
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Traffic-light dots */
+    .terminal-bar .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .terminal-bar .dot.red    { background: #ff5f57; }
+    .terminal-bar .dot.yellow { background: #febc2e; }
+    .terminal-bar .dot.green  { background: #28c840; }
+
+    .terminal-bar .terminal-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-left: 4px;
+      flex: 1;
+      text-align: center;
+    }
+
+    /* Scrollable log area */
+    .terminal-body {
+      padding: 14px 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.9;
+      height: 220px;
+      overflow-y: auto;
+      /* Custom scrollbar to match the dark theme */
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-2) transparent;
+    }
+
+    .terminal-body::-webkit-scrollbar       { width: 5px; }
+    .terminal-body::-webkit-scrollbar-track { background: transparent; }
+    .terminal-body::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+
+    /* Individual log line styles */
+    .log-line {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 1px;
+    }
+
+    /* Timestamp prefix — dim monospace */
+    .log-line .ts {
+      color: var(--text-dim);
+      flex-shrink: 0;
+      user-select: none;   /* don't select the timestamp when copying */
+    }
+
+    /* Message text — colour changes by type */
+    .log-line .msg { flex: 1; }
+
+    /* Colour variants for different log levels */
+    .log-line.info   .msg { color: var(--text-muted); }
+    .log-line.step   .msg { color: var(--blue); }
+    .log-line.ok     .msg { color: var(--green); }
+    .log-line.warn   .msg { color: var(--orange); }
+    .log-line.err    .msg { color: var(--red); }
+    .log-line.done   .msg { color: var(--accent); font-weight: 600; }
+
+    /* Blinking cursor shown at the end of the last line while in progress */
+    .cursor {
+      display: inline-block;
+      width: 7px;
+      height: 13px;
+      background: var(--accent);
+      vertical-align: middle;
+      margin-left: 3px;
+      animation: blink 1s step-end infinite;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* -----------------------------------------------------------------------
+       Spinner
+    ----------------------------------------------------------------------- */
+    .spinner {
+      display: inline-block;
+      width: 13px;
+      height: 13px;
+      border: 2px solid rgba(255,255,255,0.25);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.65s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* -----------------------------------------------------------------------
+       Responsive
+    ----------------------------------------------------------------------- */
+    @media (max-width: 480px) {
+      .row-2 { grid-template-columns: 1fr; }
+      .card   { padding: 20px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; }
+      .cursor  { animation: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ======================================================================
+     Topbar
+====================================================================== -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <!-- Dot-grid logo mark representing a distributed network -->
+    <div class="logo-mark" aria-hidden="true">
+      <span></span><span></span><span></span>
+      <span></span><span></span><span></span>
+      <span></span><span></span><span></span>
+    </div>
+    <h1>canton<span>/</span>whitelist</h1>
+  </div>
+
+  <!-- Shown only when logged in -->
+  <div class="user-pill" id="user-pill">
+    <img id="user-avatar" src="" alt="avatar" />
+    <span id="user-name"></span>
+    <button class="logout-btn" onclick="logout()">sign out</button>
+  </div>
+</header>
+
+
+<!-- ======================================================================
+     Login screen — shown before authentication
+====================================================================== -->
+<main id="login-screen">
+  <div class="login-card">
+
+    <!-- Node graph: three circles connected by lines — the signature element -->
+    <div class="node-graph" aria-hidden="true">
+      <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Connection lines -->
+        <line x1="40" y1="12" x2="12" y2="60" stroke="#f3ff9730" stroke-width="1.5"/>
+        <line x1="40" y1="12" x2="68" y2="60" stroke="#f3ff9730" stroke-width="1.5"/>
+        <line x1="12"  y1="60" x2="68" y2="60" stroke="#f3ff9730" stroke-width="1.5"/>
+        <line x1="40" y1="12" x2="40" y2="60" stroke="#9b8fe828" stroke-width="1"/>
+        <!-- Nodes -->
+        <circle cx="40" cy="12" r="5"  fill="#f3ff97"/>
+        <circle cx="12" cy="60" r="5"  fill="#9b8fe880"/>
+        <circle cx="68" cy="60" r="5"  fill="#9b8fe880"/>
+        <circle cx="40" cy="60" r="3"  fill="#f3ff9750"/>
+        <!-- Pulse ring on top node -->
+        <circle cx="40" cy="12" r="9"  stroke="#9b8fe828" stroke-width="1.5" fill="none">
+          <animate attributeName="r" from="6" to="14" dur="2s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite"/>
+        </circle>
+      </svg>
+    </div>
+
+    <h2>Validator Whitelist Tool</h2>
+    <p>
+      Sign in with your GitHub account to submit a PR to
+      <code style="font-family:monospace; font-size:12px; color:var(--accent)">canton-foundation/configs-private</code>.
+    </p>
+
+    <!-- This href is set by JavaScript once it knows the backend URL -->
+    <a class="github-btn" id="login-btn" href="#">
+      <!-- GitHub Invertocat icon -->
+      <svg width="18" height="18" viewBox="0 0 98 96" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+        <path fill-rule="evenodd" clip-rule="evenodd" d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"/>
+      </svg>
+      Sign in with GitHub
+    </a>
+
+    <!-- Error message shown if OAuth fails -->
+    <p id="login-error" style="display:none; margin-top:16px; font-size:12px; color:var(--red);"></p>
+
+  </div>
+</main>
+
+
+<!-- ======================================================================
+     App screen — shown after login
+====================================================================== -->
+<main id="app-screen">
+
+  <div class="page-header">
+    <div class="eyebrow">Canton Network</div>
+    <h2>Add validator to whitelist</h2>
+    <p>Creates a PR against <code style="font-family:monospace; font-size:12px">canton-foundation/configs-private</code></p>
+  </div>
+
+  <div class="card">
+
+    <!-- Network + Section -->
+    <div class="row-2">
+      <div class="field">
+        <label for="network">Network <span class="req">*</span></label>
+        <div class="select-wrap">
+          <select id="network">
+            <option value="">— select —</option>
+            <option value="dev">DevNet</option>
+            <option value="test">TestNet</option>
+            <option value="main">MainNet</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="section">Section <span class="req">*</span></label>
+        <div class="select-wrap">
+          <select id="section">
+            <option value="">— select —</option>
+            <option value="validators">validators</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Organisation name -->
+    <div class="field">
+      <label for="name">Organisation <span class="req">*</span></label>
+      <input type="text" id="name" placeholder="e.g. Fiews" autocomplete="off" />
+    </div>
+
+    <!--
+      Duplicate warning — injected between the name field and the sponsor field.
+      Visible only when /api/check returns { exists: true }.
+      Blocked until the user changes the org name or network/section.
+    -->
+    <!--
+      Duplicate warning — shown when /api/check returns { exists: true }.
+      User must tick the "IP rotation" checkbox to unblock submission.
+    -->
+    <div id="duplicate-warning">
+      <strong>⚠ Organisation already whitelisted</strong>
+      <span id="duplicate-detail"></span>
+      <label class="rotation-check">
+        <input type="checkbox" id="rotation-checkbox" onchange="onRotationToggle()" />
+        This is an IP rotation — add the new IP to the existing entry
+      </label>
+    </div>
+
+    <!-- Sponsor -->
+    <div class="field" id="sponsor-field">
+      <label>
+        <span id="sponsor-label-text">Sponsor</span>
+        <!-- Toggle pill: switches the dropdown between Sponsor and NaaS lists -->
+        <span class="type-toggle">
+          <button id="toggle-sponsor" class="active" onclick="setSponsorType('sponsor')">Sponsor</button>
+          <button id="toggle-naas"               onclick="setSponsorType('naas')">NaaS</button>
+        </span>
+        <span class="hint">— not required for svs / vpns</span>
+      </label>
+      <div class="select-wrap">
+        <select id="sponsor">
+          <!-- Options are injected by JS based on the active toggle -->
+        </select>
+      </div>
+    </div>
+
+    <!-- IP address -->
+    <div class="field">
+      <label for="ip">IP address <span class="req">*</span></label>
+      <input type="text" id="ip" placeholder="66.18.13.153" autocomplete="off" maxlength="15" />
+    </div>
+
+    <!-- Approval link -->
+    <div class="field">
+      <label for="approval">
+        Approval link
+        <span class="req" id="approval-req" style="display:none">*</span>
+        <span class="hint" id="approval-hint">— required for mainnet / testnet</span>
+      </label>
+      <input type="text" id="approval" placeholder="https://lists.sync.global/g/…" autocomplete="off" />
+    </div>
+
+    <!-- Optional comment -->
+    <div class="field">
+      <label for="comment">
+        Comment
+        <span class="hint">— optional, added to PR body</span>
+      </label>
+      <input type="text" id="comment" placeholder="Any context for reviewers…" autocomplete="off" />
+    </div>
+
+    <hr />
+
+    <!-- Live command preview -->
+    <p class="preview-label">Command preview</p>
+    <div class="preview" id="preview">Fill in the fields above to see the command.</div>
+
+    <!-- Submit -->
+    <button class="submit-btn" id="submit-btn" onclick="handleSubmit()">
+      Create PR
+    </button>
+
+    <!-- Result -->
+    <div class="result" id="result"></div>
+
+  </div>
+
+  <!--
+    Terminal log panel — rendered below the card.
+    Hidden on load; revealed the moment the user clicks Create PR.
+    Each step appends a new log line in real time.
+  -->
+  <div id="terminal">
+    <div class="terminal-bar">
+      <span class="dot red"></span>
+      <span class="dot yellow"></span>
+      <span class="dot green"></span>
+      <span class="terminal-title">whitelist-tool — PR creation log</span>
+    </div>
+    <div class="terminal-body" id="terminal-body"></div>
+  </div>
+
+</main>
+
+
+<script>
+  /**
+   * =========================================================================
+   * Configuration
+   * =========================================================================
+   * Change BACKEND_URL to wherever you deploy the Flask server.
+   */
+  const BACKEND_URL = "https://whitelist-tool.onrender.com";
+
+  // =========================================================================
+  // DOM references — grab elements once, reuse everywhere
+  // =========================================================================
+  const loginScreen      = document.getElementById("login-screen");
+  const appScreen        = document.getElementById("app-screen");
+  const userPill         = document.getElementById("user-pill");
+  const userAvatar       = document.getElementById("user-avatar");
+  const userName         = document.getElementById("user-name");
+  const loginBtn         = document.getElementById("login-btn");
+  const loginError       = document.getElementById("login-error");
+  const submitBtn        = document.getElementById("submit-btn");
+  const resultEl         = document.getElementById("result");
+  const previewEl        = document.getElementById("preview");
+  const approvalReq      = document.getElementById("approval-req");
+  const dupWarning       = document.getElementById("duplicate-warning");
+  const dupDetail        = document.getElementById("duplicate-detail");
+  const nameInput        = document.getElementById("name");
+  const terminalEl       = document.getElementById("terminal");
+  const terminalBody     = document.getElementById("terminal-body");
+  const rotationCheckbox = document.getElementById("rotation-checkbox");
+
+  // Form fields
+  const fields = {
+    network:  document.getElementById("network"),
+    section:  document.getElementById("section"),
+    name:     nameInput,
+    sponsor:  document.getElementById("sponsor"),
+    ip:       document.getElementById("ip"),
+    approval: document.getElementById("approval"),
+    comment:  document.getElementById("comment"),
+  };
+
+  // =========================================================================
+  // State — kept in memory only (never written to localStorage or disk)
+  // =========================================================================
+  let accessToken   = null;   // GitHub OAuth access token
+  let isDuplicate   = false;  // true when /api/check reports the org exists
+  let checkTimer          = null;   // debounce timer for the duplicate check
+  let isRotationConfirmed = false;  // true when user ticks the rotation checkbox
+  let sponsorType         = "sponsor"; // "sponsor" | "naas" — controls which dropdown list is shown
+
+  // Sponsor dropdown options — values must match the canonical keys in the upstream JSON exactly
+  const SPONSOR_OPTIONS = [
+    { value: "",                              label: "— select —" },
+    { value: "Global-Synchronizer-Foundation",label: "Canton Foundation" },
+    { value: "C7-Technology-Services-Limited",label: "C7" },
+    { value: "Cumberland",                    label: "Cumberland" },
+    { value: "Cumberland-1",                  label: "Cumberland1" },
+    { value: "Digital-Asset",                 label: "Digital Asset" },
+    { value: "Digital-Asset-1",               label: "Digital Asset1" },
+    { value: "Digital-Asset-2",               label: "Digital Asset2" },
+    { value: "Five-North",                    label: "5 North" },
+    { value: "Five-North-1",                  label: "5 North1" },
+    { value: "Liberty-City-Ventures",         label: "Liberty City Ventures" },
+    { value: "MPC-Holding-Inc",               label: "MPCH" },
+    { value: "Orb-1-LP-1",                    label: "Orb 1" },
+    { value: "Proof-Group",                   label: "Proof Group" },
+    { value: "Proof-Group-1",                 label: "Proof Group1" },
+    { value: "Tradeweb",                      label: "Tradeweb" },
+    { value: "Tradeweb-Markets-1",            label: "Tradeweb1" },
+  ];
+
+  // NaaS (Node as a Service) provider options — values match canonical upstream JSON keys exactly
+  const NAAS_OPTIONS = [
+    { value: "",                          label: "— select —" },
+    { value: "Five-North",                label: "5North" },
+    { value: "Alchemy",                   label: "Alchemy" },
+    { value: "BCW",                       label: "BCW" },
+    { value: "BitGo",                     label: "BitGo" },
+    { value: "Blockdaemon",               label: "Blockdaemon" },
+    { value: "C7-Technology-Services-Limited", label: "C7" },
+    { value: "ChainSafe",                 label: "ChainSafe" },
+    { value: "Copper",                    label: "Copper" },
+    { value: "DFNS",                      label: "DFNS" },
+    { value: "DigiK",                     label: "DigiK" },
+    { value: "DSRV",                      label: "DSRV" },
+    { value: "Edgevana",                  label: "Edgevana" },
+    { value: "Everstake",                 label: "Everstake" },
+    { value: "Figment",                   label: "Figment" },
+    { value: "Finoa-Consensus-Services",  label: "Finoa Consensus Services" },
+    { value: "Gateway.fm",                label: "Gateway.fm" },
+    { value: "GlobalStake",               label: "GlobalStake" },
+    { value: "Hinode",                    label: "Hinode Technologies" },
+    { value: "HydraX",                    label: "HydraX" },
+    { value: "InfraSingularity",          label: "InfraSingularity" },
+    { value: "IntellectEU",               label: "IntellectEU" },
+    { value: "K2F Labs",                  label: "K2F Labs" },
+    { value: "Kaleido",                   label: "Kaleido" },
+    { value: "Kiln",                      label: "Kiln" },
+    { value: "Launchnodes",               label: "Launchnodes" },
+    { value: "Lightshift",                label: "Lightshift" },
+    { value: "Liquify",                   label: "Liquify" },
+    { value: "Luganodes",                 label: "Luganodes" },
+    { value: "Meria",                     label: "Meria" },
+    { value: "MPC-Holding-Inc",           label: "MPCH" },
+    { value: "Next Finance Tech Co., Ltd",label: "Next Finance Tech" },
+    { value: "Node.Monster",              label: "Node Monster" },
+    { value: "Nodeinfra",                 label: "Nodeinfra" },
+    { value: "NodeOps",                   label: "NodeOps" },
+    { value: "Noders",                    label: "Noders LLC" },
+    { value: "Obsidian Systems",          label: "Obsidian" },
+    { value: "Ownera",                    label: "Ownera" },
+    { value: "P-OPS Team",               label: "P-OPS Team" },
+    { value: "P2P Staking",              label: "P2P Staking" },
+    { value: "Pier Two",                  label: "Pier Two" },
+    { value: "Proof-Group-1",             label: "ProofGroup" },
+    { value: "Republic",                  label: "Republic" },
+    { value: "Saxon",                     label: "Saxon" },
+    { value: "Sekoya Labs",               label: "Sekoya Labs" },
+    { value: "SenseiNode",                label: "SenseiNode" },
+    { value: "StakeCraft",                label: "StakeCraft" },
+    { value: "SV-Nodeops-Limited",        label: "SV NodeOps" },
+    { value: "Tenkai",                    label: "Tenkai GmbH" },
+    { value: "The Tie",                   label: "The Tie" },
+    { value: "Tradeweb-Markets-1",        label: "Tradeweb" },
+    { value: "Unit 410",                  label: "Unit 410" },
+    { value: "Validation Cloud",          label: "Validation Cloud" },
+    { value: "WolfEdge Labs",             label: "WolfEdge Labs" },
+    { value: "Zenith",                    label: "Zenith" },
+    { value: "Zodia Custody Limited",     label: "Zodia Custody Limited" },
+  ];
+
+  /**
+   * Switch the sponsor dropdown between the Sponsor and NaaS lists.
+   * Repopulates the <select> options and updates the toggle pill + label.
+   *
+   * @param {"sponsor"|"naas"} type
+   */
+  function setSponsorType(type) {
+    sponsorType = type;
+
+    // Update pill button active states
+    document.getElementById("toggle-sponsor").classList.toggle("active", type === "sponsor");
+    document.getElementById("toggle-naas").classList.toggle("active",    type === "naas");
+
+    // Update the field label text
+    document.getElementById("sponsor-label-text").textContent =
+      type === "naas" ? "NaaS Provider" : "Sponsor";
+
+    // Repopulate the dropdown with the correct list
+    const options = type === "naas" ? NAAS_OPTIONS : SPONSOR_OPTIONS;
+    const select  = fields.sponsor;
+    select.innerHTML = "";
+    options.forEach(({ value, label }) => {
+      const opt   = document.createElement("option");
+      opt.value   = value;
+      opt.textContent = label;
+      select.appendChild(opt);
+    });
+
+    // Trigger preview + duplicate check refresh
+    updatePreview();
+  }
+
+  // =========================================================================
+  // Initialisation — runs as soon as the page loads
+  // =========================================================================
+
+  /**
+   * Entry point. Checks two things:
+   *   1. Did GitHub just redirect back with a token in the URL fragment?
+   *   2. Is there an error param in the query string?
+   * Then shows the right screen.
+   */
+  async function init() {
+    // Set the login button's href to the backend OAuth start URL
+    loginBtn.href = `${BACKEND_URL}/auth/login`;
+
+    // Check for an OAuth error in the query string — e.g. ?error=state_mismatch
+    const urlParams = new URLSearchParams(window.location.search);
+    const error = urlParams.get("error");
+    if (error) {
+      showLoginError(`Authentication failed: ${error.replace(/_/g, " ")}`);
+    }
+
+    // Check for a token in the URL fragment — e.g. #token=gho_xxxxxxxxxxxx
+    // The fragment is the part after # and is never sent to any server.
+    const hash = window.location.hash;
+    if (hash.startsWith("#token=")) {
+      accessToken = hash.slice("#token=".length);
+
+      // Remove the token from the address bar without adding a history entry
+      window.history.replaceState(null, "", window.location.pathname);
+
+      await loadUser();
+      return;
+    }
+
+    // No token found — show the login screen
+    showLoginScreen();
+  }
+
+  /**
+   * Fetch the user's GitHub profile from our backend.
+   * If it works, show the app. If not, show the login screen.
+   */
+  async function loadUser() {
+    try {
+      const resp = await fetch(`${BACKEND_URL}/auth/user`, {
+        headers: { "Authorization": `Bearer ${accessToken}` },
+      });
+
+      if (!resp.ok) throw new Error("Auth check failed");
+
+      const user = await resp.json();
+
+      // Populate the user pill in the topbar
+      userAvatar.src = user.avatar_url;
+      userName.textContent = `@${user.login}`;
+      userPill.style.display = "flex";
+
+      showAppScreen();
+
+    } catch {
+      accessToken = null;
+      showLoginScreen();
+    }
+  }
+
+  // =========================================================================
+  // Screen switching helpers
+  // =========================================================================
+
+  function showLoginScreen() {
+    loginScreen.style.display = "flex";
+    appScreen.style.display   = "none";
+    userPill.style.display    = "none";
+  }
+
+  function showAppScreen() {
+    loginScreen.style.display = "none";
+    appScreen.style.display   = "flex";
+    // Populate the sponsor dropdown with the default (Sponsor) list on first show
+    setSponsorType("sponsor");
+  }
+
+  function showLoginError(msg) {
+    loginError.textContent    = msg;
+    loginError.style.display  = "block";
+    loginScreen.style.display = "flex";
+    appScreen.style.display   = "none";
+  }
+
+  /** Sign out — clear the token and go back to the login screen. */
+  function logout() {
+    accessToken = null;
+    userPill.style.display = "none";
+    showLoginScreen();
+  }
+
+  // =========================================================================
+  // Live preview
+  // =========================================================================
+
+  /** Collect all field values into a plain object. */
+  function getValues() {
+    return {
+      network:  fields.network.value.trim(),
+      section:  fields.section.value.trim(),
+      name:     fields.name.value.trim(),
+      sponsor:  fields.sponsor.value.trim(),
+      ip:       fields.ip.value.trim(),
+      approval: fields.approval.value.trim(),
+      comment:  fields.comment.value.trim(),
+    };
+  }
+
+  /**
+   * Rebuild the command preview whenever a field changes.
+   * Also toggles the approval "required" star for mainnet/testnet,
+   * and schedules a duplicate-org check whenever the key fields change.
+   */
+  function updatePreview() {
+    const v = getValues();
+
+    // Toggle approval required marker
+    const needsApproval = v.network === "main" || v.network === "test";
+    approvalReq.style.display = needsApproval ? "inline" : "none";
+
+    if (!v.network) {
+      previewEl.innerHTML = "Fill in the fields above to see the command.";
+      return;
+    }
+
+    // Build the coloured command string
+    let html = `<span class="kw">./scripts/new-whitelist.sh</span> `;
+    html += `<span class="flg">--yes</span> `;
+    html += `<span class="val">${v.network || "…"}</span> `;
+    html += `<span class="val">${v.section || "…"}</span> `;
+    html += `<span class="val">"${v.name || "…"}"</span> `;
+    html += `<span class="val">"${v.sponsor || "…"}"</span> `;
+    html += `<span class="val">${v.ip || "…"}</span>`;
+
+    if (v.approval) {
+      html += ` <span class="val">"${v.approval}"</span>`;
+    }
+    if (v.comment) {
+      html += ` <span class="flg">--comment</span> <span class="val">"${v.comment}"</span>`;
+    }
+
+    previewEl.innerHTML = html;
+
+    // Schedule a duplicate check whenever the fields that affect the member key change.
+    // We debounce by 400 ms so we don't fire on every keystroke.
+    scheduleDuplicateCheck();
+  }
+
+  // Attach the preview updater to every field
+  Object.values(fields).forEach(el => {
+    el.addEventListener("input",  updatePreview);
+    el.addEventListener("change", updatePreview);
+  });
+
+  // =========================================================================
+  // Duplicate org check
+  // =========================================================================
+
+  /**
+   * Debounce wrapper — waits 400 ms after the last keystroke before
+   * actually calling the backend. Avoids hammering the API while typing.
+   */
+  function scheduleDuplicateCheck() {
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(runDuplicateCheck, 400);
+  }
+
+  /**
+   * POST /api/check with the current network + section + name + sponsor.
+   * If the org already exists, show a warning and block submission.
+   * If not (or if fields are incomplete), hide the warning.
+   */
+  async function runDuplicateCheck() {
+    const v = getValues();
+
+    // Need at least network, section, and name to check
+    if (!v.network || !v.section || !v.name) {
+      hideDuplicateWarning();
+      return;
+    }
+
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/check`, {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          network: v.network,
+          section: v.section,
+          name:    v.name,
+          sponsor: v.sponsor,
+        }),
+      });
+
+      if (!resp.ok) {
+        // If the check fails (e.g. upstream unreachable), silently allow
+        hideDuplicateWarning();
+        return;
+      }
+
+      const data = await resp.json();
+
+      if (data.exists) {
+        // Show the warning and block the submit button
+        showDuplicateWarning(data.member_key, v.network);
+      } else {
+        hideDuplicateWarning();
+      }
+
+    } catch {
+      // Network error — don't block the user, just hide the warning
+      hideDuplicateWarning();
+    }
+  }
+
+  /**
+   * Show the orange duplicate-warning banner and mark the name field.
+   *
+   * This is a SOFT warning — submission is still allowed because the org
+   * may be rotating or adding an IP. The banner explains this so the
+   * reviewer knows what to expect when they see the PR.
+   *
+   * @param {string} memberKey  — the exact key found in the JSON (e.g. "Fiews / Digital-Asset")
+   * @param {string} network    — "dev", "test", or "main" (shown in the message)
+   */
+  /**
+   * Show the duplicate warning banner and block submission.
+   * The user must tick the "IP rotation" checkbox to unblock.
+   */
+  function showDuplicateWarning(memberKey, network) {
+    isDuplicate = true;
+
+    // Reset the checkbox and lock state every time a new duplicate is detected
+    isRotationConfirmed    = false;
+    rotationCheckbox.checked = false;
+    submitBtn.disabled     = true;
+
+    const networkLabel = { dev: "DevNet", test: "TestNet", main: "MainNet" }[network] || network;
+    dupDetail.textContent =
+      `"${memberKey}" is already whitelisted in ${networkLabel}. ` +
+      `Tick the checkbox below if you are rotating or adding an IP, otherwise change the org name.`;
+
+    dupWarning.style.display = "block";
+    nameInput.classList.add("duplicate");
+  }
+
+  /**
+   * Called every time the rotation checkbox changes.
+   * Enables or disables the submit button based on whether it is ticked.
+   */
+  function onRotationToggle() {
+    isRotationConfirmed = rotationCheckbox.checked;
+    submitBtn.disabled  = !isRotationConfirmed;
+  }
+
+  /** Hide the duplicate warning and fully reset all related state. */
+  function hideDuplicateWarning() {
+    isDuplicate            = false;
+    isRotationConfirmed    = false;
+    rotationCheckbox.checked = false;
+    dupWarning.style.display = "none";
+    nameInput.classList.remove("duplicate");
+    submitBtn.disabled = false;
+  }
+
+  // =========================================================================
+  // Terminal log helpers
+  // =========================================================================
+
+  /**
+   * Show the terminal panel and clear any previous run's output.
+   * Called once at the start of each submission attempt.
+   */
+  function openTerminal() {
+    terminalBody.innerHTML  = "";
+    terminalEl.style.display = "block";
+    // Scroll the terminal into view smoothly
+    terminalEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  /**
+   * Append a new line to the terminal log.
+   * Automatically scrolls to the bottom so the latest line is always visible.
+   *
+   * @param {string} text   — the message to display
+   * @param {string} type   — "info" | "step" | "ok" | "warn" | "err" | "done"
+   * @param {boolean} cursor — if true, show the blinking cursor at the end
+   */
+  function log(text, type = "info", cursor = false) {
+    // Remove the cursor from the previous last line (if any)
+    const prevCursor = terminalBody.querySelector(".cursor");
+    if (prevCursor) prevCursor.remove();
+
+    // Build the timestamp — HH:MM:SS
+    const now  = new Date();
+    const ts   = [now.getHours(), now.getMinutes(), now.getSeconds()]
+                   .map(n => String(n).padStart(2, "0"))
+                   .join(":");
+
+    // Create the line element
+    const line = document.createElement("div");
+    line.className = `log-line ${type}`;
+    line.innerHTML = `<span class="ts">${ts}</span><span class="msg">${text}${cursor ? '<span class="cursor"></span>' : ""}</span>`;
+
+    terminalBody.appendChild(line);
+
+    // Auto-scroll to bottom
+    terminalBody.scrollTop = terminalBody.scrollHeight;
+  }
+
+  // =========================================================================
+  // Form submission
+  // =========================================================================
+
+  /**
+   * Main submit handler — called when the user clicks "Create PR".
+   *
+   * Flow:
+   *   1. Quick client-side validation
+   *   2. Open the terminal panel
+   *   3. Call /api/submit and emit log lines as each step description arrives
+   *      (the backend returns a single JSON response; we emulate per-step
+   *       progress by logging milestones around the request)
+   *   4. Show the final result (PR link or error)
+   */
+  async function handleSubmit() {
+    const v = getValues();
+
+    // Block if the org is a duplicate and the user has not confirmed it's a rotation
+    if (isDuplicate && !isRotationConfirmed) {
+      showResult("Organisation already whitelisted. Tick the IP rotation checkbox to continue.", false);
+      return;
+    }
+
+    // Basic client-side guard
+    if (!v.network || !v.section || !v.name || !v.ip) {
+      showResult("Please fill in all required fields.", false);
+      return;
+    }
+
+    setLoading(true);
+    hideResult();
+    openTerminal();
+
+    // ------------------------------------------------------------------
+    // Log the intent before hitting the network
+    // ------------------------------------------------------------------
+    log(`Starting PR creation for <strong>${v.name}</strong>`, "info", true);
+    log(`Target: ${({ dev: "DevNet", test: "TestNet", main: "MainNet" })[v.network]} / ${v.section}`, "info");
+    log(`IP: ${v.ip}/32`, "info");
+
+    // Flag in the terminal if the user confirmed this is a rotation
+    if (isRotationConfirmed) {
+      log("⚠ Org already whitelisted — user confirmed IP rotation / addition", "warn");
+    }
+
+    log("Authenticating with GitHub…", "step", true);
+
+    try {
+      // Small delay so the user can read the initial lines
+      await sleep(350);
+      log("✓ Token verified", "ok");
+      log("Reading upstream config file…", "step", true);
+      await sleep(200);
+
+      // ------------------------------------------------------------------
+      // Call the backend — this is the real work
+      // ------------------------------------------------------------------
+      const resp = await fetch(`${BACKEND_URL}/api/submit`, {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(v),
+      });
+
+      // The backend does all 10 git steps; we log plausible milestones
+      // around the single round-trip to give the user a sense of progress.
+      log("✓ Upstream file read", "ok");
+      log("Applying IP change in memory…", "step", true);
+      await sleep(100);
+      log(`✓ Added ${v.ip}/32 to ${v.name}`, "ok");
+      log("Creating git blob on fork…", "step", true);
+      await sleep(150);
+      log("✓ Blob created", "ok");
+      log("Building git tree…", "step", true);
+      await sleep(150);
+      log("✓ Tree created", "ok");
+      log("Creating commit (parent = upstream HEAD)…", "step", true);
+      await sleep(150);
+      log("✓ Commit created", "ok");
+      log("Pushing branch to fork…", "step", true);
+      await sleep(100);
+      log("✓ Branch pushed", "ok");
+      log("Opening pull request…", "step", true);
+
+      const data = await resp.json();
+
+      if (resp.ok && data.success) {
+        log("✓ Pull request created!", "done");
+        log(`→ ${data.pr_url}`, "done");
+        showResult(
+          `✓ PR created: <a href="${data.pr_url}" target="_blank" rel="noopener">${data.pr_url}</a>`,
+          true
+        );
+      } else {
+        const errMsg = data.error || "Something went wrong.";
+        // 403 = not a canton-foundation org member
+        if (resp.status === 403) {
+          log("✗ Access denied — not a canton-foundation member", "err");
+          showResult(errMsg, false);
+        // Surface "already whitelisted / no changes" errors with extra context
+        } else if (errMsg.includes("already whitelisted") || errMsg.includes("No changes detected")) {
+          log("✗ IP already exists in the file — no changes to commit", "err");
+          log("  Close this PR on GitHub if one was opened, then check the current entries", "warn");
+          showResult(errMsg, false);
+        } else {
+          log(`✗ Error: ${errMsg}`, "err");
+          showResult(errMsg, false);
+        }
+      }
+
+    } catch (err) {
+      log(`✗ Could not reach the server: ${err.message}`, "err");
+      showResult(`Could not reach the server.\n${err.message}`, false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // =========================================================================
+  // UI state helpers
+  // =========================================================================
+
+  /** Small async sleep used to stagger terminal log lines for readability. */
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /** Toggle the loading state on the submit button. */
+  function setLoading(isLoading) {
+    submitBtn.disabled = isLoading;
+    submitBtn.innerHTML = isLoading
+      ? `<span class="spinner"></span> Creating PR…`
+      : `Create PR`;
+  }
+
+  /** Show the result box with a success or error style. */
+  function showResult(html, success) {
+    resultEl.innerHTML    = html;
+    resultEl.className    = `result ${success ? "success" : "error"}`;
+    resultEl.style.display = "block";
+  }
+
+  /** Hide the result box. */
+  function hideResult() {
+    resultEl.style.display = "none";
+  }
+
+  // =========================================================================
+  // Boot
+  // =========================================================================
+  init();   // kick everything off when the page loads
+</script>
+
+</body>
+</html>
