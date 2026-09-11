@@ -2,19 +2,23 @@
 github/pr.py — Pull request creation
 ======================================
 Contains all GitHub Git Data API operations needed to produce a single
-clean commit PR:
+clean commit that can touch SEVERAL config files at once.
 
-  1. Read the config file from upstream
-  2. Apply the IP change in memory
-  3. Get upstream HEAD SHA + tree SHA
-  4. Create a blob on the fork
-  5. Create a tree on the fork
-  6. Create a commit on the fork (parent = upstream HEAD)
-  7. Create a branch on the fork
-  8. Open the PR from fork:branch → upstream:main
+Why one commit can cover several networks:
+    Each network has its own file (configs/DevNet/allowed-ip-ranges.json,
+    configs/TestNet/..., configs/MainNet/...). GitHub's "create tree" API
+    accepts a LIST of file entries, so we can override all three files in
+    a single tree, wrap that tree in a single commit, and open one PR.
 
-Keeping all git steps in one module makes the sequence easy to follow
-and test independently from the Flask route layer.
+The flow:
+  1. Read each selected network's config file from upstream
+  2. Apply all requested IPs for that network in memory
+  3. Get upstream HEAD SHA + tree SHA (once, repo-level)
+  4. Create one blob per changed file
+  5. Create ONE tree listing every changed file
+  6. Create ONE commit (parent = upstream HEAD)
+  7. Create ONE branch
+  8. Open ONE PR from fork:branch → upstream:main
 """
 
 import re
@@ -27,18 +31,25 @@ from config import GITHUB_API, TARGET_OWNER, TARGET_REPO, FORK_OWNER
 from github.headers import pat_headers, user_headers
 
 
+def config_path_for(canonical_network: str) -> str:
+    """
+    Build the repo path of the allowed-IP file for a network.
+    Kept in one place so every module spells the path identically.
+    """
+    return f"configs/{canonical_network}/allowed-ip-ranges.json"
+
+
 def read_upstream_config(canonical_network: str) -> tuple[str, dict] | tuple[None, None]:
     """
     Fetch the allowed-ip-ranges.json for a given network from the upstream repo.
 
     Returns:
-        (raw_json_str, parsed_dict) — the raw string is needed later for the
+        (raw_json_str, parsed_dict) — the raw string is kept for the
                                       byte-for-byte diff check; the dict for editing
         (None, None)                — if the file could not be fetched
     """
-    config_path  = f"configs/{canonical_network}/allowed-ip-ranges.json"
     resp = requests.get(
-        f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/contents/{config_path}",
+        f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/contents/{config_path_for(canonical_network)}",
         headers=pat_headers(),
         timeout=10,
     )
@@ -49,43 +60,69 @@ def read_upstream_config(canonical_network: str) -> tuple[str, dict] | tuple[Non
     return raw_json_str, json.loads(raw_json_str)
 
 
-def apply_ip_change(
+def get_existing_ips(current_json: dict, canonical_section: str, member_key: str) -> list[str]:
+    """
+    Return the IPs already whitelisted for a member in a section.
+    Empty list if the member is not present at all.
+    Used by /api/check to tell the user what is already there.
+    """
+    return current_json.get(canonical_section, {}).get(member_key, [])
+
+
+def apply_ip_changes(
     current_json:      dict,
     raw_json_str:      str,
     canonical_section: str,
     member_key:        str,
-    ip:                str,
-) -> tuple[str, bool] | tuple[None, str]:
+    ips:               list[str],
+) -> dict:
     """
-    Add the new IP to the correct member entry in the JSON dict.
+    Add one or more IPs to a member entry in a single network's JSON.
+
+    Every IP already present is skipped rather than treated as an error —
+    a request for three IPs where one already exists should still add the
+    other two.
 
     Args:
-        current_json:      the parsed JSON dict from upstream
-        raw_json_str:      the original raw string (used for the identity check)
+        current_json:      parsed JSON dict for this network (mutated in place)
+        raw_json_str:      the original raw string, for the no-change check
         canonical_section: e.g. "validators", "svs"
-        member_key:        e.g. "Fiews / Digital-Asset"
-        ip:                bare IPv4 address e.g. "66.18.13.153"
+        member_key:        e.g. "Acme / Digital-Asset"
+        ips:               bare IPv4 addresses, e.g. ["66.18.13.153", "10.0.0.1"]
 
-    Returns:
-        (updated_json_str, is_rotation) — on success
-        (None, error_message)           — if the IP already exists or no change was made
+    Returns a dict:
+        {
+          "updated_json_str": str | None,  # None when nothing changed
+          "added":            [str],       # IPs written, in CIDR form
+          "skipped":          [str],       # IPs already present, in CIDR form
+          "is_rotation":      bool,        # member already had IPs before this change
+        }
     """
     section_data = current_json.setdefault(canonical_section, {})
     existing_ips = section_data.get(member_key, [])
 
-    # Track whether the org already had IPs (used in the PR body)
+    # The member already having IPs is what makes this a rotation/addition
     is_rotation = len(existing_ips) > 0
 
-    new_ip_cidr = f"{ip}/32"
+    added:   list[str] = []
+    skipped: list[str] = []
 
-    # Abort early if the IP is already present — avoids an empty commit
-    if new_ip_cidr in existing_ips:
-        return None, (
-            f"{new_ip_cidr} is already whitelisted for '{member_key}' "
-            f"in this section. No changes were made."
-        )
+    for ip in ips:
+        new_ip_cidr = f"{ip}/32"
+        if new_ip_cidr in existing_ips:
+            skipped.append(new_ip_cidr)
+            continue
+        existing_ips.append(new_ip_cidr)
+        added.append(new_ip_cidr)
 
-    existing_ips.append(new_ip_cidr)
+    # Nothing new for this network — leave the file untouched
+    if not added:
+        return {
+            "updated_json_str": None,
+            "added":            [],
+            "skipped":          skipped,
+            "is_rotation":      is_rotation,
+        }
 
     # Sort IPs numerically (so 10.0.0.2 comes before 10.0.0.10)
     existing_ips.sort(key=lambda x: [int(p) for p in x.split("/")[0].split(".")])
@@ -99,23 +136,30 @@ def apply_ip_change(
     # ensure_ascii=False preserves unicode characters (accented letters etc.)
     updated_json_str = json.dumps(current_json, indent=2, ensure_ascii=False) + "\n"
 
-    # Safety net: if the result is byte-for-byte identical to what we read,
-    # something went wrong — abort rather than push an empty commit
+    # Safety net: an identical result would produce an empty commit
     if updated_json_str == raw_json_str:
-        return None, (
-            f"No changes detected after applying the update for '{member_key}'. "
-            "The IP may already be present in the file. No PR was created."
-        )
+        return {
+            "updated_json_str": None,
+            "added":            [],
+            "skipped":          skipped + added,
+            "is_rotation":      is_rotation,
+        }
 
-    return updated_json_str, is_rotation
+    return {
+        "updated_json_str": updated_json_str,
+        "added":            added,
+        "skipped":          skipped,
+        "is_rotation":      is_rotation,
+    }
 
 
-def get_upstream_head(canonical_network: str) -> tuple[str, str] | tuple[None, None]:
+def get_upstream_head() -> tuple[str, str] | tuple[None, None]:
     """
     Get the HEAD commit SHA and tree SHA from upstream/main.
 
-    Our new commit will use upstream HEAD as its parent, making the PR diff
-    show only our one change regardless of how stale the fork is.
+    Repo-level, so it is fetched once no matter how many networks are
+    being changed. Our commit uses this SHA as its parent, which keeps the
+    PR diff limited to our own changes however stale the fork is.
 
     Returns:
         (head_sha, tree_sha) — on success
@@ -139,16 +183,13 @@ def get_upstream_head(canonical_network: str) -> tuple[str, str] | tuple[None, N
     if commit_resp.status_code != 200:
         return None, None
 
-    tree_sha = commit_resp.json()["tree"]["sha"]
-    return head_sha, tree_sha
+    return head_sha, commit_resp.json()["tree"]["sha"]
 
 
 def create_blob(updated_json_str: str) -> str | None:
     """
-    Create a git blob on the fork containing the updated JSON file content.
-
-    A blob is simply a file object in git's object store. Returns the blob
-    SHA on success, or None if creation failed.
+    Create a git blob on the fork containing one file's updated content.
+    Called once per changed network file. Returns the blob SHA, or None.
     """
     resp = requests.post(
         f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/git/blobs",
@@ -162,26 +203,30 @@ def create_blob(updated_json_str: str) -> str | None:
     return resp.json()["sha"] if resp.status_code == 201 else None
 
 
-def create_tree(upstream_tree_sha: str, config_path: str, blob_sha: str) -> str | None:
+def create_tree(upstream_tree_sha: str, files: list[tuple[str, str]]) -> str | None:
     """
-    Create a git tree on the fork.
+    Create a single git tree on the fork covering EVERY changed file.
 
-    Uses upstream's tree as the base so all other files stay identical.
-    Only the one config file is overridden with our new blob.
+    Args:
+        upstream_tree_sha: base tree — all untouched files stay identical
+        files:             list of (config_path, blob_sha) pairs, one per
+                           network whose file actually changed
+
     Returns the new tree SHA, or None on failure.
     """
     resp = requests.post(
         f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/git/trees",
         headers=pat_headers(),
         json={
-            "base_tree": upstream_tree_sha,   # inherit all files from upstream
+            "base_tree": upstream_tree_sha,   # inherit everything from upstream
             "tree": [
                 {
-                    "path": config_path,  # the one file we're changing
-                    "mode": "100644",     # regular file
+                    "path": path,       # one entry per changed file
+                    "mode": "100644",   # regular file
                     "type": "blob",
-                    "sha":  blob_sha,     # our updated content
+                    "sha":  blob_sha,   # that file's updated content
                 }
+                for path, blob_sha in files
             ],
         },
         timeout=10,
@@ -189,24 +234,18 @@ def create_tree(upstream_tree_sha: str, config_path: str, blob_sha: str) -> str 
     return resp.json()["sha"] if resp.status_code == 201 else None
 
 
-def create_commit(
-    new_tree_sha:      str,
-    upstream_head_sha: str,
-    name:              str,
-    canonical_section: str,
-    canonical_network: str,
-) -> str | None:
+def create_commit(new_tree_sha: str, upstream_head_sha: str, message: str) -> str | None:
     """
-    Create a git commit on the fork.
+    Create one git commit on the fork holding all file changes.
 
-    The parent is upstream's HEAD — this is what makes the PR diff clean.
+    The parent is upstream's HEAD — this is what keeps the PR diff clean.
     Returns the new commit SHA, or None on failure.
     """
     resp = requests.post(
         f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/git/commits",
         headers=pat_headers(),
         json={
-            "message": f"Add {name} to {canonical_section} on {canonical_network}",
+            "message": message,
             "tree":    new_tree_sha,
             "parents": [upstream_head_sha],  # parent = upstream HEAD, not fork main
         },
@@ -215,20 +254,18 @@ def create_commit(
     return resp.json()["sha"] if resp.status_code == 201 else None
 
 
-def create_branch(new_commit_sha: str, name: str, canonical_network: str, canonical_section: str) -> str | None:
+def create_branch(new_commit_sha: str, name: str, canonical_networks: list[str]) -> str | None:
     """
     Create a branch on the fork pointing at our new commit.
 
-    Branch name is slugified from the org name + network + section + a random
-    suffix to avoid collisions. Returns the branch name on success, or None.
+    The branch name carries the org slug and every network touched, plus a
+    random suffix so repeat submissions never collide.
+    Returns the branch name on success, or None.
     """
     safe_name     = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    networks_slug = "-".join(n.lower() for n in canonical_networks)
     random_suffix = secrets.token_hex(3)
-    branch_name   = (
-        f"whitelist-{canonical_network.lower()}"
-        f"-{canonical_section.replace(' ', '-')}"
-        f"-{safe_name}-{random_suffix}"
-    )
+    branch_name   = f"whitelist-{networks_slug}-{safe_name}-{random_suffix}"
 
     resp = requests.post(
         f"{GITHUB_API}/repos/{FORK_OWNER}/{TARGET_REPO}/git/refs",
@@ -242,42 +279,64 @@ def create_branch(new_commit_sha: str, name: str, canonical_network: str, canoni
     return branch_name if resp.status_code == 201 else None
 
 
-def open_pull_request(
-    branch_name:       str,
-    name:              str,
-    canonical_network: str,
-    member_key:        str,
-    is_rotation:       bool,
-    github_user:       str,
-    approval:          str,
-    comment:           str,
-) -> str | None:
+def build_pr_body(
+    member_key:  str,
+    changes:     list[dict],
+    github_user: str,
+    approval:    str,
+    comment:     str,
+) -> str:
     """
-    Open a PR from fork:branch → upstream:main.
+    Compose the PR description with a per-network breakdown.
 
-    Builds the PR title and body, then creates the PR via the GitHub API.
-    Returns the PR URL on success, or None on failure.
+    Args:
+        member_key:  e.g. "Acme / Digital-Asset"
+        changes:     one dict per network, each with keys
+                     network, added, skipped, is_rotation
+        github_user: the submitter's GitHub login
+        approval:    approval URL, or "" for DevNet-only requests
+        comment:     free-text note from the submitter, or ""
+
+    Returns the full markdown body.
     """
-    pr_title = f"Whitelist {name} on {canonical_network}"
-    pr_body  = f"Submitted by @{github_user} via the whitelist tool.\n\n"
+    body = f"Submitted by @{github_user} via the whitelist tool.\n\n"
+    body += f"Entry: `{member_key}`\n\n"
 
-    if is_rotation:
-        pr_body += (
-            f"**Note:** `{member_key}` already exists in this section — "
-            "this PR adds or rotates an IP.\n\n"
+    # A table reads better than prose once there is more than one network
+    body += "| Network | IPs added | Already present |\n"
+    body += "| --- | --- | --- |\n"
+    for change in changes:
+        added   = ", ".join(f"`{ip}`" for ip in change["added"])   or "—"
+        skipped = ", ".join(f"`{ip}`" for ip in change["skipped"]) or "—"
+        body   += f"| {change['network']} | {added} | {skipped} |\n"
+
+    # Flag rotations so a reviewer knows the entry already existed
+    rotating = [c["network"] for c in changes if c["is_rotation"]]
+    if rotating:
+        body += (
+            f"\n**Note:** `{member_key}` already exists on "
+            f"{', '.join(rotating)} — this PR adds or rotates IPs on those networks.\n"
         )
 
-    pr_body += f"Approval: {approval}" if approval else "DevNet only."
+    body += f"\nApproval: {approval}\n" if approval else "\nDevNet only.\n"
 
     if comment:
-        pr_body += f"\n\n{comment}"
+        body += f"\n{comment}\n"
 
+    return body
+
+
+def open_pull_request(branch_name: str, title: str, body: str) -> str | None:
+    """
+    Open a PR from fork:branch → upstream:main.
+    Returns the PR URL on success, or None on failure.
+    """
     resp = requests.post(
         f"{GITHUB_API}/repos/{TARGET_OWNER}/{TARGET_REPO}/pulls",
         headers=pat_headers(),
         json={
-            "title": pr_title,
-            "body":  pr_body,
+            "title": title,
+            "body":  body,
             "head":  f"{FORK_OWNER}:{branch_name}",
             "base":  "main",
         },
