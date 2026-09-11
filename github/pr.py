@@ -279,49 +279,28 @@ def create_branch(new_commit_sha: str, name: str, canonical_networks: list[str])
     return branch_name if resp.status_code == 201 else None
 
 
-def build_pr_body(
-    member_key:  str,
-    changes:     list[dict],
-    github_user: str,
-    approval:    str,
-    comment:     str,
-) -> str:
+def build_pr_body(github_user: str, approval: str, comment: str) -> str:
     """
-    Compose the PR description with a per-network breakdown.
+    Compose the PR description.
+
+    Deliberately minimal — the diff already shows exactly which files and
+    IPs changed, so the body only carries what the diff cannot: who
+    submitted it, the approval link, and the reason if one was given.
 
     Args:
-        member_key:  e.g. "Acme / Digital-Asset"
-        changes:     one dict per network, each with keys
-                     network, added, skipped, is_rotation
         github_user: the submitter's GitHub login
         approval:    approval URL, or "" for DevNet-only requests
-        comment:     free-text note from the submitter, or ""
+        comment:     free-text reason from the submitter, or ""
 
     Returns the full markdown body.
     """
     body = f"Submitted by @{github_user} via the whitelist tool.\n\n"
-    body += f"Entry: `{member_key}`\n\n"
 
-    # A table reads better than prose once there is more than one network
-    body += "| Network | IPs added | Already present |\n"
-    body += "| --- | --- | --- |\n"
-    for change in changes:
-        added   = ", ".join(f"`{ip}`" for ip in change["added"])   or "—"
-        skipped = ", ".join(f"`{ip}`" for ip in change["skipped"]) or "—"
-        body   += f"| {change['network']} | {added} | {skipped} |\n"
+    body += f"Approval: {approval}\n" if approval else "DevNet only.\n"
 
-    # Flag rotations so a reviewer knows the entry already existed
-    rotating = [c["network"] for c in changes if c["is_rotation"]]
-    if rotating:
-        body += (
-            f"\n**Note:** `{member_key}` already exists on "
-            f"{', '.join(rotating)} — this PR adds or rotates IPs on those networks.\n"
-        )
-
-    body += f"\nApproval: {approval}\n" if approval else "\nDevNet only.\n"
-
+    # Render the reason as a GitHub blockquote so it stands out from the rest
     if comment:
-        body += f"\n{comment}\n"
+        body += f'\n> Reason: "{comment}"\n'
 
     return body
 
