@@ -450,6 +450,123 @@
     }
 
     /* -----------------------------------------------------------------------
+       Network picker
+       One row per network. Ticking the checkbox reveals a textarea where the
+       user lists that network's IPs, one per line.
+    ----------------------------------------------------------------------- */
+    .network-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .network-row {
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+
+    /* Highlight the row once it is included in the submission */
+    .network-row.open { border-color: var(--accent); }
+
+    /* Clickable header holding the checkbox and the network name */
+    .network-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 11px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      color: var(--text);
+      margin: 0;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 500;
+    }
+
+    /* Styled square replacing the native checkbox */
+    .network-head input[type="checkbox"] {
+      appearance: none;
+      width: 15px;
+      height: 15px;
+      border: 1px solid var(--border-2);
+      border-radius: 3px;
+      background: transparent;
+      cursor: pointer;
+      flex-shrink: 0;
+      position: relative;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .network-head input[type="checkbox"]:checked {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .network-head input[type="checkbox"]:checked::after {
+      content: "";
+      position: absolute;
+      left: 4px; top: 1px;
+      width: 4px; height: 8px;
+      border: 2px solid #0a0612;
+      border-top: none; border-left: none;
+      transform: rotate(45deg);
+    }
+
+    /* Live "2 IPs" counter pinned to the right of the row header */
+    .network-count {
+      margin-left: auto;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* IP textarea area — hidden until the row is ticked */
+    .network-body {
+      display: none;
+      padding: 0 11px 10px;
+    }
+
+    .network-row.open .network-body { display: block; }
+
+    .network-body textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.7;
+      letter-spacing: 0.04em;
+      padding: 7px 10px;
+      outline: none;
+      resize: vertical;
+      min-height: 56px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .network-body textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    /* Per-network note showing IPs already on file for this org */
+    .network-note {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--orange);
+      margin-top: 5px;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+
+    .network-note:empty { display: none; }
+
+    /* -----------------------------------------------------------------------
        Command preview
     ----------------------------------------------------------------------- */
     .preview-label {
@@ -471,6 +588,8 @@
       color: var(--text-muted);
       word-break: break-all;
       min-height: 42px;
+      max-height: 190px;
+      overflow-y: auto;
       margin-bottom: 20px;
     }
 
@@ -762,28 +881,69 @@
 
   <div class="card">
 
-    <!-- Network + Section -->
-    <div class="row-2">
-      <div class="field">
-        <label for="network">Network <span class="req">*</span></label>
-        <div class="select-wrap">
-          <select id="network">
-            <option value="">— select —</option>
-            <option value="dev">DevNet</option>
-            <option value="test">TestNet</option>
-            <option value="main">MainNet</option>
-          </select>
-        </div>
+    <!-- Section — one value, shared across every selected network -->
+    <div class="field">
+      <label for="section">Section <span class="req">*</span></label>
+      <div class="select-wrap">
+        <select id="section">
+          <option value="">— select —</option>
+          <option value="validators">validators</option>
+        </select>
       </div>
+    </div>
 
-      <div class="field">
-        <label for="section">Section <span class="req">*</span></label>
-        <div class="select-wrap">
-          <select id="section">
-            <option value="">— select —</option>
-            <option value="validators">validators</option>
-          </select>
+    <!--
+      Network picker — tick any combination of networks. Each ticked network
+      reveals its own textarea for IPs (one per line). Everything ticked here
+      lands in a single commit and a single PR.
+    -->
+    <div class="field">
+      <label>
+        Networks <span class="req">*</span>
+        <span class="hint">— tick each network, then list its IPs (one per line)</span>
+      </label>
+
+      <div class="network-list">
+
+        <div class="network-row" id="row-dev">
+          <label class="network-head">
+            <input type="checkbox" id="net-dev" onchange="onNetworkToggle('dev')" />
+            DevNet
+            <span class="network-count" id="count-dev"></span>
+          </label>
+          <div class="network-body">
+            <textarea id="ips-dev" rows="2" spellcheck="false"
+                      placeholder="66.18.13.153&#10;66.18.13.154"></textarea>
+            <p class="network-note" id="note-dev"></p>
+          </div>
         </div>
+
+        <div class="network-row" id="row-test">
+          <label class="network-head">
+            <input type="checkbox" id="net-test" onchange="onNetworkToggle('test')" />
+            TestNet
+            <span class="network-count" id="count-test"></span>
+          </label>
+          <div class="network-body">
+            <textarea id="ips-test" rows="2" spellcheck="false"
+                      placeholder="52.8.44.31&#10;54.219.124.67"></textarea>
+            <p class="network-note" id="note-test"></p>
+          </div>
+        </div>
+
+        <div class="network-row" id="row-main">
+          <label class="network-head">
+            <input type="checkbox" id="net-main" onchange="onNetworkToggle('main')" />
+            MainNet
+            <span class="network-count" id="count-main"></span>
+          </label>
+          <div class="network-body">
+            <textarea id="ips-main" rows="2" spellcheck="false"
+                      placeholder="18.140.22.10"></textarea>
+            <p class="network-note" id="note-main"></p>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -807,7 +967,7 @@
       <span id="duplicate-detail"></span>
       <label class="rotation-check">
         <input type="checkbox" id="rotation-checkbox" onchange="onRotationToggle()" />
-        This is an IP rotation — add the new IP to the existing entry
+        This is an IP rotation — add the new IPs to the existing entries
       </label>
     </div>
 
@@ -829,18 +989,12 @@
       </div>
     </div>
 
-    <!-- IP address -->
-    <div class="field">
-      <label for="ip">IP address <span class="req">*</span></label>
-      <input type="text" id="ip" placeholder="66.18.13.153" autocomplete="off" maxlength="15" />
-    </div>
-
     <!-- Approval link -->
     <div class="field">
       <label for="approval">
         Approval link
         <span class="req" id="approval-req" style="display:none">*</span>
-        <span class="hint" id="approval-hint">— required for mainnet / testnet</span>
+        <span class="hint" id="approval-hint">— one link covers TestNet and MainNet</span>
       </label>
       <input type="text" id="approval" placeholder="https://lists.sync.global/g/…" autocomplete="off" />
     </div>
@@ -918,16 +1072,34 @@
   const terminalBody     = document.getElementById("terminal-body");
   const rotationCheckbox = document.getElementById("rotation-checkbox");
 
-  // Form fields
+  // Simple form fields — one value each, shared across all networks
   const fields = {
-    network:  document.getElementById("network"),
     section:  document.getElementById("section"),
     name:     nameInput,
     sponsor:  document.getElementById("sponsor"),
-    ip:       document.getElementById("ip"),
     approval: document.getElementById("approval"),
     comment:  document.getElementById("comment"),
   };
+
+  // The three networks the tool can target, in display order.
+  // "alias" is what the backend expects; "label" is what the user sees.
+  const NETWORKS = [
+    { alias: "dev",  label: "DevNet"  },
+    { alias: "test", label: "TestNet" },
+    { alias: "main", label: "MainNet" },
+  ];
+
+  // Per-network DOM handles, keyed by alias, so no repeated getElementById calls
+  const networkEls = {};
+  NETWORKS.forEach(({ alias }) => {
+    networkEls[alias] = {
+      row:      document.getElementById(`row-${alias}`),
+      checkbox: document.getElementById(`net-${alias}`),
+      textarea: document.getElementById(`ips-${alias}`),
+      count:    document.getElementById(`count-${alias}`),
+      note:     document.getElementById(`note-${alias}`),
+    };
+  });
 
   // =========================================================================
   // State — kept in memory only (never written to localStorage or disk)
@@ -1151,17 +1323,71 @@
   // Live preview
   // =========================================================================
 
-  /** Collect all field values into a plain object. */
+  /**
+   * Split a textarea's contents into a clean list of IP addresses.
+   * Accepts newlines, commas, semicolons or spaces as separators, tolerates a
+   * pasted "/32" suffix, and drops blanks and duplicates.
+   */
+  function parseIps(text) {
+    const seen = [];
+    text.split(/[\s,;]+/).forEach(token => {
+      const ip = token.trim().replace(/\/32$/, "");
+      if (ip && !seen.includes(ip)) seen.push(ip);
+    });
+    return seen;
+  }
+
+  /** Aliases of every network currently ticked, in display order. */
+  function selectedNetworks() {
+    return NETWORKS
+      .filter(({ alias }) => networkEls[alias].checkbox.checked)
+      .map(({ alias }) => alias);
+  }
+
+  /**
+   * Collect the whole form into the shape the backend expects.
+   * "networks" maps each ticked network's alias to its list of IPs.
+   */
   function getValues() {
+    const networks = {};
+    selectedNetworks().forEach(alias => {
+      networks[alias] = parseIps(networkEls[alias].textarea.value);
+    });
+
     return {
-      network:  fields.network.value.trim(),
       section:  fields.section.value.trim(),
       name:     fields.name.value.trim(),
       sponsor:  fields.sponsor.value.trim(),
-      ip:       fields.ip.value.trim(),
       approval: fields.approval.value.trim(),
       comment:  fields.comment.value.trim(),
+      networks,
     };
+  }
+
+  /** Human label for a network alias, e.g. "dev" → "DevNet". */
+  function networkLabel(alias) {
+    const match = NETWORKS.find(n => n.alias === alias);
+    return match ? match.label : alias;
+  }
+
+  /** Total number of IPs across every ticked network. */
+  function totalIpCount(networks) {
+    return Object.values(networks).reduce((sum, ips) => sum + ips.length, 0);
+  }
+
+  /**
+   * Show or hide a network's IP textarea when its checkbox is toggled,
+   * then refresh the preview and re-run the duplicate check.
+   */
+  function onNetworkToggle(alias) {
+    const els = networkEls[alias];
+    els.row.classList.toggle("open", els.checkbox.checked);
+
+    // Clear stale state when a network is unticked
+    if (!els.checkbox.checked) {
+      els.note.textContent = "";
+    }
+    updatePreview();
   }
 
   /**
@@ -1170,44 +1396,60 @@
    * and schedules a duplicate-org check whenever the key fields change.
    */
   function updatePreview() {
-    const v = getValues();
+    const v       = getValues();
+    const aliases = Object.keys(v.networks);
 
-    // Toggle approval required marker
-    const needsApproval = v.network === "main" || v.network === "test";
+    // The approval link is required as soon as TestNet or MainNet is ticked
+    const needsApproval = aliases.includes("test") || aliases.includes("main");
     approvalReq.style.display = needsApproval ? "inline" : "none";
 
-    if (!v.network) {
-      previewEl.innerHTML = "Fill in the fields above to see the command.";
+    // Refresh the "2 IPs" counter on each ticked row
+    NETWORKS.forEach(({ alias }) => {
+      const els   = networkEls[alias];
+      const count = v.networks[alias] ? v.networks[alias].length : 0;
+      els.count.textContent = els.checkbox.checked
+        ? (count === 1 ? "1 IP" : `${count} IPs`)
+        : "";
+    });
+
+    if (aliases.length === 0) {
+      previewEl.innerHTML = "Tick a network and add an IP to see the commands.";
+      scheduleDuplicateCheck();
       return;
     }
 
-    // Build the coloured command string
-    let html = `<span class="kw">./scripts/new-whitelist.sh</span> `;
-    html += `<span class="flg">--yes</span> `;
-    html += `<span class="val">${v.network || "…"}</span> `;
-    html += `<span class="val">${v.section || "…"}</span> `;
-    html += `<span class="val">"${v.name || "…"}"</span> `;
-    html += `<span class="val">"${v.sponsor || "…"}"</span> `;
-    html += `<span class="val">${v.ip || "…"}</span>`;
+    // One command line per IP per network — mirrors what you'd run by hand
+    const lines = [];
+    aliases.forEach(alias => {
+      const ips = v.networks[alias].length ? v.networks[alias] : ["…"];
+      ips.forEach(ip => {
+        let line = `<span class="kw">./scripts/new-whitelist.sh</span> `;
+        line += `<span class="flg">--yes</span> `;
+        line += `<span class="val">${alias}</span> `;
+        line += `<span class="val">${v.section || "…"}</span> `;
+        line += `<span class="val">"${v.name || "…"}"</span> `;
+        line += `<span class="val">"${v.sponsor || "…"}"</span> `;
+        line += `<span class="val">${ip}</span>`;
+        if (v.approval) line += ` <span class="val">"${v.approval}"</span>`;
+        lines.push(line);
+      });
+    });
 
-    if (v.approval) {
-      html += ` <span class="val">"${v.approval}"</span>`;
-    }
-    if (v.comment) {
-      html += ` <span class="flg">--comment</span> <span class="val">"${v.comment}"</span>`;
-    }
+    previewEl.innerHTML = lines.join("<br>");
 
-    previewEl.innerHTML = html;
-
-    // Schedule a duplicate check whenever the fields that affect the member key change.
-    // We debounce by 400 ms so we don't fire on every keystroke.
+    // Debounced duplicate check — avoids an API call on every keystroke
     scheduleDuplicateCheck();
   }
 
-  // Attach the preview updater to every field
+  // Attach the preview updater to every simple field…
   Object.values(fields).forEach(el => {
     el.addEventListener("input",  updatePreview);
     el.addEventListener("change", updatePreview);
+  });
+
+  // …and to every network textarea (the checkboxes use onNetworkToggle)
+  NETWORKS.forEach(({ alias }) => {
+    networkEls[alias].textarea.addEventListener("input", updatePreview);
   });
 
   // =========================================================================
@@ -1224,15 +1466,17 @@
   }
 
   /**
-   * POST /api/check with the current network + section + name + sponsor.
-   * If the org already exists, show a warning and block submission.
-   * If not (or if fields are incomplete), hide the warning.
+   * POST /api/check with the section, org, sponsor and every ticked network.
+   * The backend replies with one result per network. If the org already
+   * exists on any of them, show the warning and block submission until the
+   * user confirms it is a rotation.
    */
   async function runDuplicateCheck() {
-    const v = getValues();
+    const v       = getValues();
+    const aliases = Object.keys(v.networks);
 
-    // Need at least network, section, and name to check
-    if (!v.network || !v.section || !v.name) {
+    // Need a section, a name, and at least one network before checking
+    if (!v.section || !v.name || aliases.length === 0) {
       hideDuplicateWarning();
       return;
     }
@@ -1245,24 +1489,36 @@
           "Authorization": `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          network: v.network,
-          section: v.section,
-          name:    v.name,
-          sponsor: v.sponsor,
+          section:  v.section,
+          name:     v.name,
+          sponsor:  v.sponsor,
+          networks: aliases,
         }),
       });
 
       if (!resp.ok) {
-        // If the check fails (e.g. upstream unreachable), silently allow
+        // Check failed (e.g. upstream unreachable) — don't block the user
         hideDuplicateWarning();
         return;
       }
 
       const data = await resp.json();
 
-      if (data.exists) {
-        // Show the warning and block the submit button
-        showDuplicateWarning(data.member_key, v.network);
+      // Show each network's existing IPs underneath its textarea
+      clearNetworkNotes();
+      (data.results || []).forEach(result => {
+        const alias = NETWORKS.find(n => n.label === result.network)?.alias;
+        if (alias && result.exists) {
+          networkEls[alias].note.textContent =
+            `already on file: ${result.existing_ips.join(", ")}`;
+        }
+      });
+
+      if (data.any_exists) {
+        const hits = (data.results || [])
+          .filter(r => r.exists)
+          .map(r => `${r.network} (${r.existing_ips.length})`);
+        showDuplicateWarning(data.member_key, hits);
       } else {
         hideDuplicateWarning();
       }
@@ -1273,32 +1529,33 @@
     }
   }
 
-  /**
-   * Show the orange duplicate-warning banner and mark the name field.
-   *
-   * This is a SOFT warning — submission is still allowed because the org
-   * may be rotating or adding an IP. The banner explains this so the
-   * reviewer knows what to expect when they see the PR.
-   *
-   * @param {string} memberKey  — the exact key found in the JSON (e.g. "Fiews / Digital-Asset")
-   * @param {string} network    — "dev", "test", or "main" (shown in the message)
-   */
+  /** Wipe the "already on file" note under every network textarea. */
+  function clearNetworkNotes() {
+    NETWORKS.forEach(({ alias }) => {
+      networkEls[alias].note.textContent = "";
+    });
+  }
+
   /**
    * Show the duplicate warning banner and block submission.
    * The user must tick the "IP rotation" checkbox to unblock.
+   *
+   * @param {string}   memberKey — the exact key found in the JSON
+   *                               (e.g. "Fiews / Digital-Asset")
+   * @param {string[]} hits      — networks where the entry already exists,
+   *                               each already formatted as "DevNet (2)"
    */
-  function showDuplicateWarning(memberKey, network) {
+  function showDuplicateWarning(memberKey, hits) {
     isDuplicate = true;
 
-    // Reset the checkbox and lock state every time a new duplicate is detected
-    isRotationConfirmed    = false;
+    // Reset the checkbox and re-lock every time a new duplicate is detected
+    isRotationConfirmed      = false;
     rotationCheckbox.checked = false;
-    submitBtn.disabled     = true;
+    submitBtn.disabled       = true;
 
-    const networkLabel = { dev: "DevNet", test: "TestNet", main: "MainNet" }[network] || network;
     dupDetail.textContent =
-      `"${memberKey}" is already whitelisted in ${networkLabel}. ` +
-      `Tick the checkbox below if you are rotating or adding an IP, otherwise change the org name.`;
+      `"${memberKey}" is already whitelisted on ${hits.join(", ")}. ` +
+      `Tick the checkbox below if you are rotating or adding IPs, otherwise change the org name.`;
 
     dupWarning.style.display = "block";
     nameInput.classList.add("duplicate");
@@ -1315,12 +1572,13 @@
 
   /** Hide the duplicate warning and fully reset all related state. */
   function hideDuplicateWarning() {
-    isDuplicate            = false;
-    isRotationConfirmed    = false;
+    isDuplicate              = false;
+    isRotationConfirmed      = false;
     rotationCheckbox.checked = false;
     dupWarning.style.display = "none";
     nameInput.classList.remove("duplicate");
-    submitBtn.disabled = false;
+    submitBtn.disabled       = false;
+    clearNetworkNotes();
   }
 
   // =========================================================================
@@ -1384,7 +1642,9 @@
    *   4. Show the final result (PR link or error)
    */
   async function handleSubmit() {
-    const v = getValues();
+    const v       = getValues();
+    const aliases = Object.keys(v.networks);
+    const ipTotal = totalIpCount(v.networks);
 
     // Block if the org is a duplicate and the user has not confirmed it's a rotation
     if (isDuplicate && !isRotationConfirmed) {
@@ -1392,9 +1652,27 @@
       return;
     }
 
-    // Basic client-side guard
-    if (!v.network || !v.section || !v.name || !v.ip) {
+    // Basic client-side guards
+    if (!v.section || !v.name) {
       showResult("Please fill in all required fields.", false);
+      return;
+    }
+    if (aliases.length === 0) {
+      showResult("Tick at least one network.", false);
+      return;
+    }
+
+    // Every ticked network needs at least one IP — name the empty ones
+    const empty = aliases.filter(a => v.networks[a].length === 0);
+    if (empty.length) {
+      showResult(`Add at least one IP for ${empty.map(networkLabel).join(", ")}.`, false);
+      return;
+    }
+
+    // Approval link is required as soon as TestNet or MainNet is included
+    const needsApproval = aliases.includes("test") || aliases.includes("main");
+    if (needsApproval && !v.approval) {
+      showResult("An approval link is required when TestNet or MainNet is selected.", false);
       return;
     }
 
@@ -1406,8 +1684,17 @@
     // Log the intent before hitting the network
     // ------------------------------------------------------------------
     log(`Starting PR creation for <strong>${v.name}</strong>`, "info", true);
-    log(`Target: ${({ dev: "DevNet", test: "TestNet", main: "MainNet" })[v.network]} / ${v.section}`, "info");
-    log(`IP: ${v.ip}/32`, "info");
+    log(`Section: ${v.section}`, "info");
+    log(
+      `Networks: ${aliases.map(networkLabel).join(", ")} ` +
+      `(${ipTotal} IP${ipTotal === 1 ? "" : "s"} total)`,
+      "info"
+    );
+
+    // One line per network listing exactly what will be added
+    aliases.forEach(alias => {
+      log(`  ${networkLabel(alias)} → ${v.networks[alias].join(", ")}`, "info");
+    });
 
     // Flag in the terminal if the user confirmed this is a rotation
     if (isRotationConfirmed) {
@@ -1435,16 +1722,16 @@
         body: JSON.stringify(v),
       });
 
-      // The backend does all 10 git steps; we log plausible milestones
-      // around the single round-trip to give the user a sense of progress.
-      log("✓ Upstream file read", "ok");
-      log("Applying IP change in memory…", "step", true);
+      // The backend does every git step in one round-trip; we log plausible
+      // milestones around it to give the user a sense of progress.
+      log(`✓ Read ${aliases.length} upstream config file${aliases.length === 1 ? "" : "s"}`, "ok");
+      log("Applying IP changes in memory…", "step", true);
       await sleep(100);
-      log(`✓ Added ${v.ip}/32 to ${v.name}`, "ok");
-      log("Creating git blob on fork…", "step", true);
+      log(`✓ Staged ${ipTotal} IP${ipTotal === 1 ? "" : "s"} for ${v.name}`, "ok");
+      log(`Creating ${aliases.length} git blob${aliases.length === 1 ? "" : "s"} on fork…`, "step", true);
       await sleep(150);
-      log("✓ Blob created", "ok");
-      log("Building git tree…", "step", true);
+      log("✓ Blobs created", "ok");
+      log("Building a single git tree across all files…", "step", true);
       await sleep(150);
       log("✓ Tree created", "ok");
       log("Creating commit (parent = upstream HEAD)…", "step", true);
@@ -1458,6 +1745,16 @@
       const data = await resp.json();
 
       if (resp.ok && data.success) {
+        // Print what actually landed per network, including anything skipped
+        (data.changes || []).forEach(change => {
+          if (change.added.length) {
+            log(`✓ ${change.network}: added ${change.added.join(", ")}`, "ok");
+          }
+          if (change.skipped.length) {
+            log(`  ${change.network}: already present — ${change.skipped.join(", ")}`, "warn");
+          }
+        });
+
         log("✓ Pull request created!", "done");
         log(`→ ${data.pr_url}`, "done");
         showResult(
@@ -1472,8 +1769,8 @@
           showResult(errMsg, false);
         // Surface "already whitelisted / no changes" errors with extra context
         } else if (errMsg.includes("already whitelisted") || errMsg.includes("No changes detected")) {
-          log("✗ IP already exists in the file — no changes to commit", "err");
-          log("  Close this PR on GitHub if one was opened, then check the current entries", "warn");
+          log("✗ Every requested IP is already on file — nothing to commit", "err");
+          log("  Check the existing entries before resubmitting", "warn");
           showResult(errMsg, false);
         } else {
           log(`✗ Error: ${errMsg}`, "err");
