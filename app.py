@@ -386,7 +386,7 @@ def api_submit():
     # 9. Open ONE pull request
     # ------------------------------------------------------------------
     pr_title = f"Whitelist {name} on {', '.join(changed_networks)}"
-    pr_body  = build_pr_body(member_key, changes, github_user, approval, comment)
+    pr_body  = build_pr_body(github_user, approval, comment)
 
     pr_url = open_pull_request(branch_name, pr_title, pr_body)
     if not pr_url:
